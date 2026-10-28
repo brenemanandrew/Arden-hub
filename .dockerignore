@@ -1,0 +1,8 @@
+test
+tools
+docs
+data
+*.md
+*.log
+node_modules
+.git

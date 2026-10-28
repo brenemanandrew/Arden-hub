@@ -1,0 +1,30 @@
+# Deploys arden-hub.fly.dev on every push to main.
+# Needs one repository secret: FLY_API_TOKEN. The token must be allowed to
+# deploy the arden-hub app (an org deploy token covers every app; a token
+# made for the ardenot app alone does not).
+name: Deploy the hub to Fly
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+concurrency:
+  group: fly-deploy-hub
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check the server parses and the tests pass
+        run: |
+          node --check server.js
+          node -e "JSON.parse(require('fs').readFileSync('dashboards.json','utf8'))"
+          node test/test-server.js
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy (one machine, on purpose)
+        run: flyctl deploy --remote-only --ha=false -a arden-hub
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

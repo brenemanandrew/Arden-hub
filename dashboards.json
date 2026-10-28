@@ -1,0 +1,160 @@
+{
+  "site": {
+    "title": "Arden Dashboards",
+    "subtitle": "Hubbell Arden Distribution Center",
+    "intervalSeconds": 60
+  },
+  "dashboards": [
+    {
+      "id": "pack",
+      "name": "Pack",
+      "blurb": "Pack board: orders, handling units and open deliveries from SAP.",
+      "url": "https://ardenpack.fly.dev/",
+      "group": "Floor boards",
+      "health": {
+        "url": "https://ardenpack.fly.dev/api/health",
+        "expect": {
+          "status": [
+            200
+          ],
+          "json": {
+            "ok": true
+          }
+        },
+        "fields": [
+          {
+            "label": "Warehouse tasks",
+            "path": "feed.wh.rows",
+            "kind": "count"
+          },
+          {
+            "label": "Tasks read",
+            "path": "feed.wh.readAt",
+            "kind": "time",
+            "staleMin": 30
+          },
+          {
+            "label": "Orders",
+            "path": "feed.orders.rows",
+            "kind": "count"
+          },
+          {
+            "label": "Orders read",
+            "path": "feed.orders.readAt",
+            "kind": "time",
+            "staleMin": 30
+          },
+          {
+            "label": "Handling units",
+            "path": "feed.stage.rows",
+            "kind": "count"
+          },
+          {
+            "label": "HU feed",
+            "path": "feed.stage.status",
+            "kind": "text"
+          }
+        ]
+      }
+    },
+    {
+      "id": "pick",
+      "name": "Pick",
+      "blurb": "Pickers page of Staging Lane Health: rates against standard, trend and activity.",
+      "url": "https://staging-lane-health.fly.dev/pickers",
+      "group": "Floor boards",
+      "health": {
+        "url": "https://staging-lane-health.fly.dev/api/health",
+        "expect": {
+          "status": [
+            200
+          ],
+          "json": {
+            "ok": true
+          }
+        },
+        "fields": [
+          {
+            "label": "Mode",
+            "path": "mode",
+            "kind": "text"
+          },
+          {
+            "label": "Build",
+            "path": "v",
+            "kind": "count"
+          }
+        ]
+      }
+    },
+    {
+      "id": "staging",
+      "name": "Staging Lane Health",
+      "blurb": "Floor TV and ops views of the staging lanes, pushed from the SAP PC.",
+      "url": "https://staging-lane-health.fly.dev/",
+      "group": "Floor boards",
+      "health": {
+        "url": "https://staging-lane-health.fly.dev/api/health",
+        "expect": {
+          "status": [
+            200
+          ],
+          "json": {
+            "ok": true
+          }
+        },
+        "fields": [
+          {
+            "label": "Mode",
+            "path": "mode",
+            "kind": "text"
+          },
+          {
+            "label": "Build",
+            "path": "v",
+            "kind": "count"
+          }
+        ]
+      }
+    },
+    {
+      "id": "overtime",
+      "name": "Weekend Overtime",
+      "blurb": "Sign-up kiosk, the weighted draw and the posting sheet.",
+      "url": "https://ardenot.fly.dev/",
+      "group": "People",
+      "health": {
+        "url": "https://ardenot.fly.dev/health",
+        "expect": {
+          "status": [
+            200
+          ],
+          "text": "ok"
+        }
+      }
+    },
+    {
+      "id": "ideas",
+      "name": "CI Idea Board",
+      "blurb": "Idea cards from the floor, by QR code.",
+      "url": "https://hubbellideaboard.fly.dev/",
+      "group": "People",
+      "health": {
+        "url": "https://hubbellideaboard.fly.dev/",
+        "expect": {
+          "status": [
+            200
+          ]
+        },
+        "slowMs": 6000
+      }
+    },
+    {
+      "id": "ops-site",
+      "name": "Operations site",
+      "blurb": "SharePoint home: Standard Work, 5S, news. Add its address in dashboards.json.",
+      "url": "",
+      "group": "Links"
+    }
+  ]
+}
