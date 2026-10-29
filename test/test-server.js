@@ -12,6 +12,7 @@ let passed = 0;
 function ok(name, cond) { if (!cond) { console.error('FAIL ' + name); process.exitCode = 1; } else { passed++; console.log('ok   ' + name); } }
 
 /* stand-in dashboards */
+let flaky = 0;
 const mock = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
   const j = (o) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
@@ -25,6 +26,8 @@ const mock = http.createServer((req, res) => {
     return j({ ok: true, rev: 12, at: '2026-10-28 09:15', roster: 3, pending: 0 });
   }
   if (u.pathname === '/redir') { res.writeHead(302, { Location: '/ok' }); return res.end(); }
+  if (u.pathname === '/flaky') { flaky++; if (flaky % 2 === 1) return; /* first of each pair never answers */ return j({ ok: true }); }
+  if (u.pathname === '/never') return; /* never answers */
   res.writeHead(404); res.end('nope');
 });
 
@@ -39,7 +42,9 @@ const mock = http.createServer((req, res) => {
     { id: 'e', name: 'Echo link', url: '' },
     { id: 'f', name: 'Foxtrot', url: base + '/', health: { url: base + '/redir', expect: { text: 'ok' }, data: { url: base + '/ping', auth: { bearerEnv: 'HUB_KEY_TEST' }, tz: 'America/New_York', fields: [{ label: 'Rev', path: 'rev', kind: 'count' }, { label: 'Synced', path: 'at', kind: 'time' }] } } },
     { id: 'g', name: 'Golf', url: base + '/', health: { url: base + '/ping', data: { url: base + '/ping', auth: { bearerEnv: 'HUB_KEY_MISSING' } } } },
-    { id: 'h', name: 'Hotel', url: base + '/', health: { url: base + '/fresh', fields: [{ label: 'Read', path: 'feed.readAt', kind: 'time', staleMin: 30 }] } }
+    { id: 'h', name: 'Hotel', url: base + '/', health: { url: base + '/fresh', fields: [{ label: 'Read', path: 'feed.readAt', kind: 'time', staleMin: 30 }] } },
+    { id: 'i', name: 'India', url: base + '/', health: { url: base + '/flaky', timeoutMs: 400, retryDelayMs: 50 } },
+    { id: 'j', name: 'Juliet', url: base + '/', health: { url: base + '/never', timeoutMs: 400, retryDelayMs: 50 } }
   ] };
   const cfgFile = path.join(tmp, 'dashboards.json');
   fs.writeFileSync(cfgFile, JSON.stringify(cfg));
@@ -93,14 +98,16 @@ const mock = http.createServer((req, res) => {
   ok('the kiosk time form is read as Eastern', synced === want);
   ok('a missing key skips the data request and says so', by.g.state === 'down' && /skipped|HUB_KEY_MISSING|answered 401/.test(by.g.note + by.g.err));
   ok('fresh data is UP', by.h.state === 'up' && by.h.fields[0].stale === false);
-  ok('overall is the worst state and counts add up', s.overall === 'down' && s.counts.down === 2 && s.counts.stale === 1 && s.counts.slow === 1 && s.counts.up === 3);
-  ok('what changed lists the first results', s.events.length === 7 && s.events.every(e => e.from === null));
+  ok('no answer once, then an answer, is SLOW with a note', by.i.state === 'slow' && /second try/.test(by.i.note));
+  ok('no answer twice is DOWN', by.j.state === 'down' && /no answer/.test(by.j.err));
+  ok('overall is the worst state and counts add up', s.overall === 'down' && s.counts.down === 3 && s.counts.stale === 1 && s.counts.slow === 2 && s.counts.up === 3);
+  ok('what changed lists the first results', s.events.length === 9 && s.events.every(e => e.from === null));
   ok('the 24 h strip has 144 cells with the newest filled', by.a.cells.length === 144 && by.a.cells[143] === 0 && by.a.cells[0] === -1);
   r = await get('/api/history?id=a', H); const hst = await r.json(); ok('history is served per dashboard', hst.samples.length === 1 && hst.samples[0].s === 0);
   r = await get('/api/history?id=zzz', H); ok('unknown dashboard is a 404', r.status === 404);
   await post('/api/check-now', '', H);
   r = await get('/api/status', H); const s2 = await r.json();
-  ok('a second cycle keeps the state and adds no events', s2.runs === 2 && s2.events.length === 7 && s2.dashboards.find(d => d.id === 'a').samples24 === 2);
+  ok('a second cycle keeps the state and adds no events', s2.runs === 2 && s2.events.length === 9 && s2.dashboards.find(d => d.id === 'a').samples24 === 2);
   app.checker.dirty = true; app.checker.save();
   ok('history is written to the data folder', fs.existsSync(path.join(tmp, 'data', 'history.json')));
 
