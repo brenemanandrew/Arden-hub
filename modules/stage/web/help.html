@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Staging Lane Health - Help</title>
+<link rel="stylesheet" href="/web/board2.css">
+<style>
+  .docpick{ display:flex; gap:8px; flex-wrap:wrap; margin:0 0 14px; }
+  .docpick a{ padding:7px 13px; border:1px solid var(--line,#3a3a3a); border-radius:7px;
+              text-decoration:none; color:inherit; font-size:14px; }
+  .docpick a.on{ background:var(--accent,#2d6cdf); color:#fff; border-color:transparent; font-weight:600; }
+  .doclay{ display:grid; grid-template-columns:210px minmax(0,1fr); gap:26px; align-items:start; }
+  .toc summary{ cursor:pointer; font-weight:600; opacity:.9; }
+  .toc{ position:sticky; top:14px; font-size:13px; line-height:1.7; }
+  .toc a{ display:block; text-decoration:none; color:inherit; opacity:.75; }
+  .toc a:hover{ opacity:1; }
+  .toc a.sub{ padding-left:12px; font-size:12.5px; opacity:.6; }
+  /* On a phone the contents sit above the document, and eleven lines of
+     them before the title is a page you scroll past rather than use. So
+     there it is one line that opens; on a wide screen it is always open
+     and the line itself is not drawn. */
+  @media (min-width:901px){ .toc summary{ display:none; } }
+  @media (max-width:900px){
+    .doclay{ grid-template-columns:1fr; }
+    .toc{ position:static; margin-bottom:10px; font-size:14px; }
+    .toc summary{ padding:7px 0; }
+    .toc a{ padding:4px 0; }
+  }
+  .md{ max-width:52em; line-height:1.62; }
+  .md h1{ font-size:27px; margin:0 0 4px; }
+  .md h2{ font-size:20px; margin:34px 0 10px; padding-top:14px; border-top:1px solid var(--line,#3a3a3a); }
+  .md h3{ font-size:16px; margin:22px 0 6px; }
+  .md p, .md li{ font-size:14.5px; }
+  .md p{ margin:0 0 13px; }
+  /* a rule written under a heading and the heading's own rule are the
+     same line twice; the documents use --- as a section break, so the
+     heading that follows one does not draw its own */
+  .md hr + h2{ border-top:0; padding-top:0; margin-top:4px; }
+  .md table{ border-collapse:collapse; margin:12px 0; width:100%; font-size:14px; }
+  .md th, .md td{ border:1px solid var(--line,#3a3a3a); padding:6px 9px; text-align:left; vertical-align:top; }
+  .md th{ background:rgba(127,127,127,.14); font-weight:600; }
+  .md code{ font-family:ui-monospace,Consolas,monospace; font-size:.9em;
+            background:rgba(127,127,127,.17); padding:1px 5px; border-radius:4px; }
+  .md pre{ background:rgba(127,127,127,.12); padding:11px 13px; border-radius:7px; overflow:auto; }
+  .md pre code{ background:none; padding:0; }
+  .md hr{ border:0; border-top:1px solid var(--line,#3a3a3a); margin:26px 0; }
+  .md blockquote{ margin:12px 0; padding:2px 0 2px 14px; border-left:3px solid var(--line,#3a3a3a); opacity:.85; }
+  .md a{ color:var(--accent,#2d6cdf); }
+  @media print{
+    .bar, .docpick, .toc, .noprint{ display:none !important; }
+    .doclay{ display:block; } .md{ max-width:none; }
+    .md h2{ break-after:avoid; } .md table, .md pre{ break-inside:avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="bar" data-page="help" data-sub="Help"></div>
+<main class="wrap">
+  <div class="docpick" id="pick"></div>
+  <div class="doclay">
+    <nav class="toc" id="toc"></nav>
+    <article class="md" id="doc">loading</article>
+  </div>
+  <p class="hint noprint" style="margin-top:28px">
+    These are files in the <code>docs</code> folder of the program, so the same text
+    prints, mails and opens without the service running.
+    <a href="#" id="printBtn">Print this page</a>.
+  </p>
+</main>
+<script src="/web/theme.js"></script>
+<script>
+/* Markdown, rendered here rather than on the server, so the file on disk
+   stays the thing people edit and there is nothing to rebuild when it
+   changes. Only the subset these documents actually use: headings,
+   tables, lists, fences, rules, quotes, bold, code and links. */
+const $ = id => document.getElementById(id);
+const DOCS = [
+  ['runbook',     'Runbook',               'what breaks and what to do'],
+  ['definitions', 'What the numbers mean', 'every measurement defined'],
+  ['readme',      'Full guide',            'how all of it works'],
+  ['technical',   'Technical',             'how it is built']
+];
+
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function inline(s){
+  return esc(s)
+    .replace(/`([^`]+)`/g, (m, c) => '<code>' + c + '</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*\w])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+    .replace(/\[([^\]]*)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>');
+}
+const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const cells = l => l.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(x => x.trim());
+
+function render(md){
+  const lines = md.replace(/\r/g, '').split('\n');
+  const out = [], heads = [];
+  let i = 0, para = [], list = null;
+  const flushPara = () => { if(para.length){ out.push('<p>' + inline(para.join(' ')) + '</p>'); para = []; } };
+  const flushList = () => { if(list){ out.push('</' + list + '>'); list = null; } };
+  const flush = () => { flushPara(); flushList(); };
+
+  while(i < lines.length){
+    const l = lines[i];
+
+    if(/^```/.test(l)){                                   // fenced code
+      flush(); i++;
+      const buf = [];
+      while(i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
+      i++;
+      out.push('<pre><code>' + esc(buf.join('\n')) + '</code></pre>');
+      continue;
+    }
+    if(/^\s*$/.test(l)){ flush(); i++; continue; }
+    if(/^(---+|\*\*\*+)\s*$/.test(l)){ flush(); out.push('<hr>'); i++; continue; }
+
+    /* Four spaces is a code block too. The formulas in the full guide are
+       written that way, and as paragraphs they run together into one line
+       with the arithmetic unreadable. Only when a block is actually
+       starting: an indented line under a bullet belongs to the bullet. */
+    if(/^(    |\t)/.test(l) && !list && !para.length){
+      flush();
+      const buf = [];
+      while(i < lines.length){
+        if(/^\s*$/.test(lines[i])){
+          if(!/^(    |\t)/.test(lines[i + 1] || '')) break;   // blank line inside, not the end
+          buf.push(''); i++; continue;
+        }
+        if(!/^(    |\t)/.test(lines[i])) break;
+        buf.push(lines[i++].replace(/^(    |\t)/, ''));
+      }
+      out.push('<pre><code>' + esc(buf.join('\n')) + '</code></pre>');
+      continue;
+    }
+
+    const h = /^(#{1,6})\s+(.*)$/.exec(l);
+    if(h){
+      flush();
+      const n = h[1].length, text = h[2].trim(), id = slug(text);
+      if(n === 2 || n === 3) heads.push({ id: id, text: text, n: n });
+      out.push('<h' + n + ' id="' + id + '">' + inline(text) + '</h' + n + '>');
+      i++; continue;
+    }
+    /* a table is a header row followed by a row of dashes; without that
+       second row it is just a line with pipes in it */
+    if(/\|/.test(l) && i + 1 < lines.length && /\|/.test(lines[i + 1]) &&
+       /^\s*\|?[\s:|-]*-[\s:|-]*$/.test(lines[i + 1])){
+      flush();
+      const head = cells(l);
+      i += 2;
+      const body = [];
+      while(i < lines.length && /\|/.test(lines[i]) && !/^\s*$/.test(lines[i])) body.push(cells(lines[i++]));
+      out.push('<table><thead><tr>' + head.map(c => '<th>' + inline(c) + '</th>').join('') + '</tr></thead><tbody>' +
+        body.map(r => '<tr>' + r.map(c => '<td>' + inline(c) + '</td>').join('') + '</tr>').join('') +
+        '</tbody></table>');
+      continue;
+    }
+    const b = /^\s*([-*+]|\d+\.)\s+(.*)$/.exec(l);
+    if(b){
+      flushPara();
+      const want = /\d/.test(b[1]) ? 'ol' : 'ul';
+      if(list !== want){ flushList(); out.push('<' + want + '>'); list = want; }
+      /* a wrapped bullet is indented under it and belongs to it */
+      let text = b[2];
+      while(i + 1 < lines.length && /^\s{2,}\S/.test(lines[i + 1]) && !/^\s*([-*+]|\d+\.)\s/.test(lines[i + 1])){
+        text += ' ' + lines[++i].trim();
+      }
+      out.push('<li>' + inline(text) + '</li>');
+      i++; continue;
+    }
+    if(/^\s*>\s?/.test(l)){
+      flush();
+      const buf = [];
+      while(i < lines.length && /^\s*>\s?/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/, ''));
+      out.push('<blockquote>' + inline(buf.join(' ')) + '</blockquote>');
+      continue;
+    }
+    flushList();
+    para.push(l.trim());
+    i++;
+  }
+  flush();
+  return { html: out.join('\n'), heads: heads };
+}
+
+/* #runbook picks the document, #runbook/a-pc-rebooted a place inside it,
+   so a link in a message can land on the one section somebody needs */
+const wide = () => window.innerWidth > 900;
+function which(){
+  const n = (location.hash || '').replace(/^#/, '').split('/')[0];
+  return DOCS.some(d => d[0] === n) ? n : 'runbook';
+}
+async function show(){
+  const name = which();
+  $('pick').innerHTML = DOCS.map(d =>
+    '<a href="#' + d[0] + '"' + (d[0] === name ? ' class="on"' : '') + ' title="' + d[2] + '">' + d[1] + '</a>').join('');
+  let text;
+  try{
+    const r = await fetch('/api/doc?name=' + encodeURIComponent(name));
+    if(!r.ok) throw new Error('the service does not have that document');
+    text = await r.text();
+  }catch(e){
+    $('doc').innerHTML = '<p>Could not load it: ' + esc(e.message) + '</p>' +
+      '<p>The file is in the <code>docs</code> folder of the program folder on the host PC.</p>';
+    $('toc').innerHTML = '';
+    return;
+  }
+  const r = render(text);
+  $('doc').innerHTML = r.html;
+  const links = r.heads.map(h =>
+    '<a href="#' + name + '/' + h.id + '"' + (h.n === 3 ? ' class="sub"' : '') + '>' + esc(h.text) + '</a>').join('');
+  $('toc').innerHTML = '<details' + (wide() ? ' open' : '') + '><summary>Jump to a section</summary>' + links + '</details>';
+  const to = (location.hash || '').split('/')[1];
+  const el = to && document.getElementById(to);
+  if(el) el.scrollIntoView();
+  else window.scrollTo(0, 0);
+}
+window.addEventListener('hashchange', show);
+/* turning a phone sideways, or dragging a window wider, should not leave
+   the contents shut on a screen with room for them */
+window.addEventListener('resize', () => {
+  const d = document.querySelector('#toc details');
+  if(d) d.open = wide() || d.open;
+});
+$('printBtn').onclick = e => { e.preventDefault(); window.print(); };
+show();
+</script>
+</body>
+</html>

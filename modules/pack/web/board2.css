@@ -1,0 +1,340 @@
+/* Staging Lane Health: one visual system for every page. Roles, not raw
+   colours, so light and dark swap in one place (body.dark). Status colours
+   are the fixed status palette and always ship with a word or an icon. */
+:root, body{
+  color-scheme: light;
+  --surface:#fcfcfb; --plane:#f2f1ed; --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+  --hair:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,.10);
+  --blue:#2a78d6; --blue-soft:#cde2fb; --gray:#898781;
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --fresh:#dedcd5; --fresh-ink:#0b0b0b; --amber:#FFC000;
+  --tile:#ffffff; --open-ink:#087a08;
+}
+body.dark{
+  color-scheme: dark;
+  --surface:#1a1a19; --plane:#0d0d0d; --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+  --hair:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10);
+  --blue:#3987e5; --blue-soft:#184f95; --gray:#898781;
+  --fresh:#3a3a37; --fresh-ink:#ffffff; --tile:#1a1a19; --open-ink:#3fcf3f;
+}
+*{ box-sizing:border-box; margin:0; padding:0; }
+html, body{ height:100%; }
+body{ font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif; background:var(--plane); color:var(--ink); }
+a{ color:inherit; }
+.num{ font-variant-numeric: tabular-nums; }
+.wrap{ max-width:1400px; margin:0 auto; padding:16px 22px 40px; }
+.hint{ font-size:13px; color:var(--muted); }
+
+/* ---- what needs a person, at the top of the page ----------------------
+   One row per thing that is wrong, worst first, each with the view that
+   shows it. The colour is the status palette the whole app reads by; the
+   word beside it says the same thing, so colour is never carrying it
+   alone. Nothing wrong means nothing drawn. */
+.attention{ display:grid; gap:8px; margin:0 0 14px; }
+.attention[hidden]{ display:none; }
+.att{ display:flex; align-items:center; gap:12px; background:var(--tile); border:1px solid var(--ring);
+  border-left:5px solid var(--gray); border-radius:8px; padding:10px 14px; }
+.att.bad{ border-left-color:var(--crit); }
+.att.warn{ border-left-color:var(--warn); }
+.att.go{ border-left-color:var(--good); }
+.att-t{ font-size:16px; font-weight:800; line-height:1.25; min-width:0; }
+.att-t small{ display:block; font-size:13px; font-weight:500; color:var(--ink-2); margin-top:2px; }
+.att.bad .att-t{ color:var(--crit); } .att.go .att-t{ color:var(--open-ink); }
+.att-go{ margin-left:auto; flex:0 0 auto; font-size:13px; font-weight:800; text-decoration:none;
+  color:var(--ink); background:var(--plane); border:1px solid var(--axis); border-radius:6px; padding:7px 12px; }
+.att-go:hover{ background:var(--amber); border-color:var(--amber); color:#000; }
+/* the card the strip sent you to, lit for a moment so the eye finds it */
+.att-lit{ animation:attlit 1.6s ease-out; }
+@keyframes attlit{ from{ box-shadow:0 0 0 3px var(--amber); } to{ box-shadow:0 0 0 3px transparent; } }
+@media (max-width:600px){
+  .att{ padding:9px 11px; gap:8px; }
+  .att-t{ font-size:15px; }
+  .att-go{ padding:8px 10px; }
+}
+code{ font-family:Consolas, monospace; background:#000; color:var(--amber); padding:2px 7px; border-radius:4px; font-size:.92em; }
+h1{ font-size:24px; margin:4px 0 10px; }
+
+/* ---------- top bar (every page) ---------- */
+/* one bar everywhere: same order of parts, wraps onto a second line on a
+   narrow window instead of overflowing */
+.bar, .top{ display:flex; align-items:center; flex-wrap:wrap; gap:8px 18px; background:#000; color:#fff; padding:6px 22px; min-height:56px; }
+.bar .title, .top .brand{ font-weight:800; letter-spacing:.06em; font-size:22px; text-transform:uppercase; white-space:nowrap; }
+.bar .title b, .top .brand b{ color:var(--amber); }
+.bar .sub{ color:#c3c2b7; font-size:15px; }
+.bar .grow{ flex:1; }
+.top nav{ margin-left:auto; }
+.bar nav a, .top nav a{ color:#c3c2b7; text-decoration:none; font-weight:700; margin-left:16px; font-size:14px; }
+.bar nav a.on, .bar nav a:hover, .top nav a.on, .top nav a:hover{ color:var(--amber); }
+.bar .clock{ font-size:22px; font-weight:700; font-variant-numeric: tabular-nums; }
+.bar > *{ flex:0 0 auto; white-space:nowrap; }
+.bar .grow{ flex:1 1 0; min-width:8px; }
+.bar .tools{ display:flex; gap:6px; align-items:center; }
+.bar .tools .btn{ white-space:nowrap; font-size:12px; padding:5px 9px; margin-left:0; }
+.bar .feed{ white-space:nowrap; }
+.bar #key, .bar #key span{ white-space:nowrap; }
+.bar .logo{ height:34px; width:auto; display:block; }
+.bar .logo-link{ display:flex; align-items:center; margin-right:-4px; }
+.bar nav{ display:flex; align-items:center; }
+/* the gap between what acts on this screen and where else to go */
+.bar .gap{ width:14px; flex:0 0 14px; }
+/* menus in the bar: a label with a small arrow, a dark panel beneath */
+.bar .dd{ position:relative; }
+.bar nav .dd{ margin-left:16px; }
+.bar .dd > .top{ margin-left:0; display:inline-flex; align-items:center; gap:4px; cursor:pointer; }
+.bar .dd > .top i{ font-style:normal; font-size:11px; opacity:.8; }
+.bar nav .dd.on > .top{ color:var(--amber); }
+.bar .dd .menu{ display:none; position:absolute; top:calc(100% + 8px); left:-8px; min-width:250px; z-index:60;
+  background:#111; border:1px solid #333; border-radius:10px; padding:6px 0; box-shadow:0 12px 30px rgba(0,0,0,.5); white-space:normal; }
+.bar .dd.open .menu{ display:block; }
+@media (hover:hover){ .bar .dd:hover .menu{ display:block; } }
+.bar .dd .menu::before{ content:''; position:absolute; top:-9px; left:0; right:0; height:10px; }   /* no gap to fall through on the way down */
+.bar .dd .menu a, .bar .dd .menu button{ display:block; width:100%; text-align:left; margin:0; padding:9px 16px; font:inherit; font-size:14px; font-weight:700; color:#eee; background:none; border:0; cursor:pointer; text-decoration:none; }
+.bar .dd .menu a small{ display:block; font-size:12px; font-weight:600; color:#8a9299; margin-top:1px; }
+.bar .dd .menu a:hover, .bar .dd .menu button:hover, .bar .dd .menu a.on{ color:var(--amber); background:#1a1a1a; }
+.bar .dd .menu a.on small{ color:#b08a1f; }
+/* the page's own menu sits with the tools, so it looks like one of them */
+.bar .tools .dd.tool > .top{ margin-left:0; }
+/* Host or viewer, said once, beside the title. The word is the fact anybody
+   asking "which one am I looking at" wants, and it is the same fact the body
+   class carries, so the two can never disagree. */
+.bar .mode{ font-size:11px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; padding:3px 8px; border-radius:999px;
+  border:1px solid var(--hair); color:var(--muted); background:var(--surface); white-space:nowrap; }
+.bar .mode:empty{ display:none; }
+body.cloud .bar .mode{ color:var(--amber); border-color:var(--amber); }
+/* the second pill: host view is on for this screen, click to leave it */
+.bar .mode.hostview{ font:inherit; font-size:11px; font-weight:800; letter-spacing:.12em; text-transform:uppercase;
+  cursor:pointer; color:var(--ink-2); border-color:var(--hair); background:var(--surface); }
+.bar .mode.hostview:hover{ border-color:var(--amber); color:var(--amber); }
+/* A laptop is narrower than a wall. Under 1400px the bar gives up what it
+   can spare: the gaps between its parts, and the subtitle, which only ever
+   repeats the menu item already lit. Under 1300px the title comes down a
+   size and the feed pill keeps its dot but drops its words. The bar stays on
+   one line down to a 1280 laptop; below that it wraps, which is a phone's
+   job anyway. */
+@media (max-width:1400px){
+  .bar{ gap:8px 11px; }
+  .bar .sub{ display:none; }
+  .bar nav a, .bar nav .dd{ margin-left:11px; }
+  .bar nav a, .bar nav .dd > .top{ font-size:13px; }
+}
+@media (max-width:600px){
+  .bar{ padding:8px 10px; gap:6px 8px; }
+  .bar .title{ font-size:16px; letter-spacing:.02em; }
+  .bar .logo, .bar .logo-link img{ height:26px; }
+  .bar .clock, .bar .sub, .bar .key{ display:none; }
+  .bar .mode{ font-size:10px; padding:2px 6px; }
+  .bar .tools{ gap:4px; }
+  .bar .tools .btn{ padding:4px 7px; font-size:11px; }
+  .bar nav a, .bar nav .dd{ margin-left:8px; }
+  .bar nav a small, .bar nav .dd .menu a small{ display:none; }
+}
+@media (max-width:1300px){
+  .bar .title{ font-size:18px; }
+  .bar .feed #feedText{ display:none; }
+  .bar .tools .btn{ padding:5px 7px; }
+}
+.bar .tools a.btn{ line-height:normal; }
+.btn.bulb{ background:#222; color:#aaa; border-color:#444; padding:4px 8px; line-height:0; margin-left:14px; }
+.btn.bulb .glass{ fill:none; stroke:currentColor; stroke-width:1.8; }
+.btn.bulb.lit{ color:var(--amber); border-color:var(--amber); }
+.btn.bulb.lit .glass{ fill:var(--amber); stroke:var(--amber); }
+.btn.bulb:hover{ color:var(--amber); border-color:var(--amber); }
+.btn.theme, .btn.bartool{ background:#222; color:#ddd; border-color:#444; margin-left:14px; }
+.btn.theme:hover, .btn.bartool:hover{ color:var(--amber); border-color:var(--amber); }
+.feed{ display:inline-flex; align-items:center; gap:8px; font-size:14px; color:#c3c2b7; }
+.feed .d{ width:12px; height:12px; border-radius:50%; background:var(--muted); }
+.feed.ok .d{ background:var(--good); } .feed.warn .d{ background:var(--warn); } .feed.bad .d{ background:var(--crit); }
+.feed .test{ background:var(--amber); color:#000; font-weight:800; padding:2px 8px; border-radius:4px; font-size:12px; }
+
+/* ---------- stat tiles ---------- */
+.tiles{ display:grid; gap:12px; }
+.tile{ background:var(--tile); border:1px solid var(--ring); border-radius:8px; padding:12px 16px 10px; min-width:0; }
+.tile .lab{ font-size:14px; color:var(--ink-2); font-weight:600; }
+.tile .val{ font-size:48px; font-weight:600; line-height:1.05; margin-top:2px; }
+.tile .val small{ font-size:20px; color:var(--ink-2); font-weight:500; }
+.tile .sub{ font-size:13px; color:var(--muted); margin-top:4px; min-height:16px; }
+.tile .sub.good{ color:var(--good); font-weight:700; } .tile .sub.bad{ color:var(--crit); font-weight:700; }
+.tile.alert{ border-color:var(--crit); box-shadow:inset 4px 0 0 var(--crit); }
+.tile.open-tile .val{ color:var(--open-ink); }
+.meter{ height:6px; background:var(--blue-soft); border-radius:3px; margin-top:8px; overflow:hidden; }
+.meter i{ display:block; height:100%; background:var(--blue); border-radius:3px; }
+.meter.warn i{ background:var(--warn); } .meter.crit i{ background:var(--crit); } .meter.good i{ background:var(--good); }
+
+/* ---------- status tags ---------- */
+.tag{ display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:800; letter-spacing:.04em; padding:2px 7px; border-radius:4px; white-space:nowrap; }
+.tag.ready{ background:var(--good); color:#fff; }
+.tag.wait{ background:rgba(0,0,0,.28); color:#fff; }
+.lane.fresh .tag.wait{ background:rgba(0,0,0,.14); color:var(--fresh-ink); }
+.tag.loose, .tag.split{ background:#000; color:var(--amber); }
+.tag.unknown{ background:#000; color:var(--amber); }
+.tag.hosp{ background:rgba(255,255,255,.22); color:#fff; }
+.tag.open{ background:transparent; color:var(--open-ink); border:1.5px solid var(--open-ink); }
+
+/* ---------- lane grid ---------- */
+.zone{ margin-bottom:10px; }
+.zone h3{ font-size:13px; font-weight:800; letter-spacing:.08em; color:var(--muted); text-transform:uppercase; margin:0 0 6px 2px; display:flex; gap:10px; align-items:baseline; }
+.zone h3 span{ font-weight:700; letter-spacing:0; text-transform:none; color:var(--open-ink); }
+.zone h3 span.late{ color:var(--crit); }
+.lrow{ display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:6px; margin-bottom:6px; }
+.lane{ position:relative; border-radius:8px; padding:8px 8px 7px; min-height:92px; display:flex; flex-direction:column; gap:2px; background:var(--tile); border:1.5px solid var(--hair); color:var(--ink); overflow:hidden; }
+/* the lane name leads; the staged time sits to its right and only grows
+   when this is the oldest red lane */
+.lane .lhead{ display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:2px 6px; }
+.lane .bin{ font-size:22px; font-weight:800; letter-spacing:.02em; color:var(--ink-2); line-height:1; white-space:nowrap; }
+.lane .age{ font-size:17px; font-weight:700; line-height:1; font-variant-numeric: tabular-nums; white-space:nowrap; margin-left:auto; }
+.lane.late.oldest .age{ font-size:30px; font-weight:900; }
+/* the tote (or order) as a labelled box, per the floor sketch */
+.lane .field{ display:flex; align-items:center; gap:6px; margin-top:3px; min-width:0; }
+.lane .field .fl{ font-size:11px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; opacity:.9; flex:0 0 auto; }
+.lane .field .fv{ flex:1 1 auto; min-width:0; background:rgba(255,255,255,.94); color:#0b0b0b; border:1px solid rgba(0,0,0,.28); border-radius:4px; padding:2px 6px; font-weight:800; font-size:15px; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lane .field .fv .more{ font-size:11px; opacity:.7; }
+.lane .openword{ font-size:22px; font-weight:900; letter-spacing:.1em; color:var(--open-ink); margin:auto 0; text-align:center; }
+.lane .ord{ display:none; font-size:15px; font-weight:800; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; letter-spacing:.02em; }
+.lane .ord .more{ font-weight:600; opacity:.75; font-size:12px; }
+.lane .ord2{ font-size:11px; font-weight:600; opacity:.75; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-height:13px; }
+.lane .tag{ align-self:flex-start; margin-top:auto; font-size:10.5px; padding:1px 5px; }
+/* open lanes are the second thing a picker looks for, so they read as
+   available, not as blank */
+.lane.empty{ border:2px dashed var(--open-ink); background:transparent; }
+.lane.empty .bin{ color:var(--muted); }
+.lane.fresh{ background:var(--fresh); color:var(--fresh-ink); border-color:transparent; }
+.lane.fresh .bin, .lane.fresh .ord, .lane.fresh .ord2{ color:var(--fresh-ink); }
+.lane.fresh .bin{ opacity:.9; }
+.lane.aging{ background:var(--warn); color:#0b0b0b; border-color:transparent; }
+.lane.aging .bin, .lane.aging .ord, .lane.aging .ord2{ color:#0b0b0b; }
+.lane.aging .bin{ opacity:.9; }
+.lane.late{ background:var(--crit); color:#fff; border-color:transparent; }
+.lane.late .bin, .lane.late .ord, .lane.late .ord2{ color:#fff; }
+.lane.late .bin{ opacity:1; }
+/* done: solid green so a builder sees it from across the floor. The age
+   still shows as text, and a thin stripe keeps the age colour underneath. */
+.lane.ready{ background:var(--good); color:#fff; border-color:transparent; }
+.lane.ready .bin, .lane.ready .ord{ color:#fff; }
+.lane.ready .bin{ opacity:1; }
+.lane.ready .tag.ready{ background:#fff; color:var(--good); }
+.lane .agebar{ position:absolute; left:0; right:0; bottom:0; height:6px; }
+.lane .agebar.aging{ background:var(--warn); } .lane .agebar.late{ background:var(--crit); }
+.lane.hosp-lane{ background:var(--blue); color:#fff; border-color:transparent; }
+.lane.hosp-lane .bin, .lane.hosp-lane .ord, .lane.hosp-lane .ord2{ color:#fff; }
+/* exceptions get a black corner band so they stand out from ordinary red */
+.lane.exception{ outline:3px solid #000; outline-offset:-3px; }
+body.dark .lane.exception{ outline-color:var(--amber); }
+.lane.oldest::after{ content:"!"; position:absolute; top:-8px; right:-8px; width:24px; height:24px; border-radius:50%; background:#000; color:var(--amber); font-weight:900; font-size:15px; line-height:24px; text-align:center; border:2px solid var(--surface); }
+.lane .link{ position:absolute; left:8px; right:8px; bottom:0; height:4px; border-radius:2px 2px 0 0; background:var(--blue); }
+.lane .multi{ position:absolute; top:8px; right:8px; font-size:11px; font-weight:800; background:rgba(0,0,0,.35); color:#fff; padding:1px 6px; border-radius:3px; }
+.lane.aging .multi{ background:rgba(0,0,0,.18); color:#0b0b0b; }
+
+/* one area per line */
+.linerow{ display:grid; grid-template-columns:52px 1fr; gap:6px; margin-bottom:6px; align-items:stretch; }
+.lrow{ align-items:stretch; }
+.linerow .lrow{ margin-bottom:0; }
+.rlab{ display:flex; flex-direction:column; justify-content:center; align-items:center; border-radius:6px; background:var(--tile); border:1px solid var(--ring); color:var(--ink-2); text-decoration:none; }
+.rlab:hover{ border-color:var(--amber); }
+.rlab b{ font-size:18px; letter-spacing:.04em; color:var(--ink); }
+.rlab span{ font-size:10px; font-weight:700; color:var(--open-ink); }
+
+/* ---------- cards and lists ---------- */
+.card, .box, .status-card{ background:var(--tile); border:1px solid var(--ring); border-radius:8px; padding:12px 14px; }
+.card h2, h2.ch{ font-size:13px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:8px; display:flex; align-items:baseline; gap:10px; }
+.card h2 span, h2.ch span{ font-weight:600; letter-spacing:0; text-transform:none; color:var(--ink-2); font-size:12px; }
+h2.ch{ margin-top:20px; }
+h2.ch + .box, h2.ch + p{ margin-top:0; }
+.rank{ display:grid; grid-template-columns:auto 1fr auto; gap:4px 10px; align-items:center; font-size:14px; }
+.rank .l{ font-weight:800; font-variant-numeric: tabular-nums; }
+.rank .track{ height:14px; background:transparent; position:relative; }
+.rank .track i{ display:block; height:14px; border-radius:0 4px 4px 0; background:var(--fresh); min-width:4px; }
+.rank .track i.aging{ background:var(--warn); } .rank .track i.late{ background:var(--crit); }
+.rank .r{ display:flex; align-items:center; gap:8px; white-space:nowrap; }
+.rank .r .a{ font-weight:700; font-variant-numeric: tabular-nums; min-width:44px; text-align:right; }
+.rank .note{ grid-column:2 / span 2; font-size:12px; color:var(--muted); margin-top:-3px; margin-bottom:2px; }
+.empty-note{ color:var(--muted); font-size:14px; padding:6px 0; }
+.stuck{ display:flex; flex-direction:column; gap:6px; }
+.stuck .row{ display:flex; gap:10px; align-items:baseline; font-size:14px; }
+.stuck .row .l{ font-weight:800; min-width:58px; }
+.stuck .row .d{ color:var(--ink-2); min-width:96px; font-variant-numeric: tabular-nums; }
+.stuck .row .why{ color:var(--ink); flex:1; }
+.stuck .row .a{ font-weight:700; font-variant-numeric: tabular-nums; color:var(--muted); }
+
+/* ---------- pace chart ---------- */
+.chart{ position:relative; }
+.chart svg{ width:100%; height:auto; display:block; overflow:visible; }
+.chart .grid line{ stroke:var(--hair); stroke-width:1; }
+.chart .axis text{ fill:var(--muted); font-size:11px; font-variant-numeric: tabular-nums; }
+.chart .bar-t{ fill:var(--blue); } .chart .bar-y{ fill:var(--gray); opacity:.55; }
+.chart .lbl{ fill:var(--ink); font-size:11px; font-weight:700; }
+.legend{ display:flex; gap:16px; font-size:12px; color:var(--ink-2); margin-top:6px; align-items:center; }
+.legend i{ display:inline-block; width:12px; height:12px; border-radius:2px; margin-right:5px; vertical-align:-2px; }
+.legend .t i{ background:var(--blue); } .legend .y i{ background:var(--gray); opacity:.55; }
+
+/* ---------- tables, buttons, forms (shared by data/admin) ---------- */
+table{ width:100%; border-collapse:collapse; font-size:14px; }
+table th, table td{ text-align:left; padding:6px 8px; border-bottom:1px solid var(--hair); vertical-align:top; }
+table th{ color:var(--muted); font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.05em; }
+table td.n, table th.n, td.num, th.num{ text-align:right; font-variant-numeric: tabular-nums; }
+.btn{ font:inherit; font-size:13px; font-weight:700; border:1px solid var(--axis); background:var(--tile); color:var(--ink); padding:6px 12px; border-radius:5px; cursor:pointer; text-decoration:none; display:inline-block; }
+.btn.primary{ background:var(--amber); border-color:var(--amber); color:#000; }
+.btn.danger{ background:var(--crit); border-color:var(--crit); color:#fff; }
+.btn.small{ font-size:11px; padding:2px 8px; }
+.btn:disabled{ opacity:.5; cursor:default; }
+.row{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:10px 0; }
+label.f{ display:flex; flex-direction:column; gap:4px; font-size:13px; font-weight:700; color:var(--ink-2); }
+label.f input, label.f select, label.f textarea{ font:inherit; font-weight:400; padding:6px 8px; border:1px solid var(--axis); border-radius:4px; min-width:140px; background:var(--surface); color:var(--ink); }
+label.f input.wide{ min-width:320px; }
+.ok-t{ color:var(--good); font-weight:700; } .warn-t{ color:var(--warn); font-weight:700; } .bad-t{ color:var(--crit); font-weight:700; }
+pre.log{ background:#111; color:#ddd; padding:10px; border-radius:4px; font-size:12.5px; line-height:1.4; max-height:420px; overflow:auto; font-family:Consolas, monospace; white-space:pre-wrap; }
+pre.log .warn{ color:#ffd166; } pre.log .error{ color:#ff6b6b; }
+.toast{ position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:#000; color:var(--amber); padding:10px 18px; border-radius:6px; font-weight:700; opacity:0; transition:opacity .2s; pointer-events:none; z-index:50; }
+.toast.show{ opacity:1; }
+.tabs{ display:flex; gap:4px; margin-top:16px; border-bottom:3px solid var(--amber); }
+.tabs button{ font:inherit; font-weight:700; border:none; background:var(--tile); color:var(--ink-2); padding:8px 14px; cursor:pointer; border-radius:4px 4px 0 0; }
+.tabs button.on{ background:var(--amber); color:#000; }
+.pane{ display:none; } .pane.on{ display:block; }
+details{ margin-top:8px; } summary{ cursor:pointer; font-weight:700; }
+.pill{ display:flex; align-items:center; gap:10px; font-size:22px; font-weight:800; }
+.dot{ width:16px; height:16px; border-radius:50%; background:var(--muted); display:inline-block; }
+.dot.ok{ background:var(--good); } .dot.warn{ background:var(--warn); } .dot.bad{ background:var(--crit); }
+.status-card{ border-left:6px solid var(--amber); }
+/* The copy hides what belongs to the PC next to SAP - until somebody
+   unlocks host view on that screen (five taps on the logo and the code),
+   which shows the lot. Still a viewer: it can look, not change. */
+body.cloud:not(.hostview) [data-host-only]{ display:none !important; }
+.status-card .sub{ color:var(--ink-2); margin-top:6px; font-size:14px; }
+.steps{ margin-top:10px; display:flex; flex-wrap:wrap; gap:8px 22px; }
+.step{ display:flex; align-items:center; gap:7px; font-size:15px; }
+.step .sd{ width:10px; height:10px; border-radius:50%; background:var(--muted); }
+.step.ok .sd{ background:var(--good); } .step.warn .sd{ background:var(--warn); } .step.bad .sd{ background:var(--crit); }
+.grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:14px; margin-top:18px; }
+.grid .tile{ text-decoration:none; }
+.grid{ grid-auto-flow:row; }
+.top nav .btn{ margin-right:6px; }
+.grid .tile:hover{ border-color:var(--amber); }
+.grid .tile.big{ background:#000; color:#fff; grid-column:span 2; }
+.grid .tile.big .t{ color:var(--amber); font-size:26px; }
+.grid .tile .t{ font-weight:800; font-size:19px; margin-bottom:6px; }
+.grid .tile .d{ font-size:14px; opacity:.85; line-height:1.4; }
+.zone-links{ margin-top:10px; display:flex; flex-wrap:wrap; gap:8px; }
+.zone-links a{ background:var(--amber); color:#000; font-weight:700; text-decoration:none; padding:5px 10px; border-radius:4px; font-size:14px; }
+.howto ol{ margin:12px 0 0 24px; line-height:1.55; font-size:15px; }
+.howto ol li{ margin-bottom:8px; }
+.addr{ margin-top:12px; font-size:14px; color:var(--ink-2); }
+.kv{ display:grid; grid-template-columns:200px 1fr; gap:6px 12px; font-size:14px; }
+.kv b{ color:var(--ink-2); }
+.dl{ display:grid; grid-template-columns:1fr auto auto auto; gap:8px 14px; align-items:center; padding:8px 0; border-bottom:1px solid var(--hair); }
+.dl .n{ font-weight:700; } .dl .m{ font-size:13px; color:var(--muted); }
+
+/* ---------- docking tray (Ctrl+click) ---------- */
+[data-mod].docked{ display:none !important; }
+.dock{ display:none; gap:8px; padding:8px 22px 0; flex-wrap:wrap; }
+.dock.has{ display:flex; }
+.dock-tile{ font:inherit; font-size:13px; font-weight:700; background:var(--tile); color:var(--ink-2); border:1px dashed var(--axis); border-radius:6px; padding:5px 12px; cursor:pointer; }
+.dock-tile:hover{ border-color:var(--amber); color:var(--ink); }
+.tiles{ grid-auto-flow:column; grid-auto-columns:1fr; }
+.tiles:not(:has([data-mod]:not(.docked))){ display:none; }
+
+/* ---------- Shift-drag rearranging ---------- */
+body.shift [data-mod]{ cursor:grab; }
+body.shift [data-mod]:hover{ outline:3px dashed var(--amber); outline-offset:3px; }
+[data-mod].dragging{ opacity:.25; }
+.drag-ghost{ position:fixed; left:0; top:0; z-index:100; pointer-events:none; opacity:.85; box-shadow:0 12px 30px rgba(0,0,0,.45); border-radius:8px; }
+.shift-only{ display:none; } body.shift .shift-only{ display:inline-block; }
+@media (max-width:700px){ .grid .tile.big{ grid-column:span 1; } .top{ height:auto; flex-wrap:wrap; padding:10px 14px; } }

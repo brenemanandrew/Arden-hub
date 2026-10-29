@@ -1,164 +1,146 @@
 # Arden Hub
 
-The front door to every Arden dashboard: **https://arden-hub.fly.dev**
+One app for the Arden floor: **https://arden-hub.fly.dev**
 
-One PIN. A black screen with the Hubbell logo. Then one tile per dashboard
-(Pack, Pick, Staging Lane Health, Weekend Overtime, the CI idea board) and a
-health board that checks all of them once a minute and keeps a week of history.
+One PIN (2468 by default), a black screen with the Hubbell logo, then the
+whole operation in the order the work flows: **Shift, Pick, Pack, Stage, Ship**,
+and beside it **People, Improve, System**. Staging Lane Health and Arden Pack
+run inside the hub as modules, so nothing links out to another site except the
+overtime kiosk and the idea board, which keep their own apps for now.
 
-Node standard library only, one file per job, no build step. Same bones as
-ardenot, the overtime kiosk server.
+Node standard library only, no build step, one Fly machine, data on one volume.
+
+## The sections
+
+| Section | What it is | Where it comes from |
+|---|---|---|
+| **Shift** (`/`) | The home page. Four step cards, Pick, Pack, Stage, Ship, each with one hero number and the two or three figures under it; what needs attention, ranked; what to clear next; pace by the hour; the feed pills. | `/api/shift`, built from the modules' own APIs and cached 15 s |
+| **Pick** (`/stage/pickers`) | Picks against target by person, this shift, today, 7 or 30 days. The pickers tab of Staging Lane Health. | stage module |
+| **Pack** (`/pack/pack`) | The pack board: units and lines off the benches, pace against the day before, bench by hour. | pack module |
+| **Stage** (`/stage/tv`) | The lane board: floor TV, ops view, classic and phone views. | stage module |
+| **Ship** (`/ship`) | Orders out of the door by the hour, totes out, and what they were worth once the two ECC value exports are switched on. | stage module `/api/board` |
+| **People** (`/people`) | Weekend Overtime kiosk (its own app), picker review, people, months. | links and the stage module |
+| **Improve** (`/improve`) | The CI idea board (its own app), the pick standards, the definitions. | links and the stage module |
+| **System** (`/system`) | The health board: both modules and every outside dashboard checked once a minute, a week of history, what changed. | `lib/checker.js` |
+
+A module page carries the hub's black section bar at the top with the module's
+own sub-pages on the right. TV views (`?tv=1`, `/stage/panel`, `/stage/phone`)
+and anything loaded in an iframe are served bare, as the module wrote them.
 
 ## What is in here
 
 | Path | What |
 |---|---|
-| `server.js` | the web server: sign-in, home page, health board, the JSON the board reads |
-| `lib/auth.js` | the door: PIN, signed 180-day cookie, lockouts, "sign out everywhere" |
+| `server.js` | the web server: sign-in, routes, the module proxy, the hub's own pages and APIs |
+| `lib/modules.js` | starts the two modules as child processes, restarts them when they die, proxies `/stage/...` and `/pack/...`, rewrites their root-absolute links, injects the section bar |
+| `lib/shell.js` | the section bar, the shared page frame, which section a module page belongs to |
+| `lib/shift.js` | builds the Shift model from `/stage/api/board`, `/stage/api/pickers`, `/stage/api/status`, `/pack/api/pack`, `/pack/api/health` |
+| `lib/sections.js` | Shift, Ship, People, Improve and the "module is down" page |
+| `lib/pages.js` | the sign-in page and the health board |
 | `lib/checker.js` | asks every dashboard how it is, keeps samples and events, works out uptime and answer times |
-| `lib/pages.js` | the three pages as HTML strings |
-| `dashboards.json` | **the list of dashboards**: name, blurb, address, how to check it |
-| `public/logo.png` | the Hubbell logo from the kiosk |
+| `lib/auth.js` | the door: PIN, signed 180-day cookie, lockouts, "sign out everywhere" |
+| `modules/stage/` | Staging Lane Health, build `64c5a53` (see `modules/UPSTREAM.md`) |
+| `modules/pack/` | Arden Pack, build `ac3544a` |
+| `dashboards.json` | the outside links (`links`) and what the System board checks |
 | `tools/make-secrets.js` | makes the Fly secrets (PIN hash, session secret) |
-| `test/test-server.js` | smoke tests against stand-in dashboards (`node test/test-server.js`) |
-| `docs/LESSONS.md` | what the other dashboards taught and how the hub applies it |
-| `fly.toml`, `Dockerfile` | the Fly app `arden-hub`, one machine, volume `hub_data` at `/data` |
+| `test/test-server.js` | the tests: door, pages, proxy, open doors, supervision, checker (`node test/test-server.js`, about 20 s) |
+| `docs/DESIGN.md` | why it is shaped this way; `docs/LESSONS.md` what the other dashboards taught |
+| `fly.toml`, `Dockerfile` | the Fly app `arden-hub`, one machine, 512 MB, volume `hub_data` at `/data` |
 
-## Pages
-
-- `/` signed out: black screen, logo, PIN box. Signed in: the tiles, each with a
-  live pill (up, slow, stale data, down).
-- `/status` the health board. Light by default; the bulb switches to dark and the
-  choice sticks on that device. `?tv=1` is for a wall TV: no controls, stays awake,
-  reloads itself every six hours.
-- `/health` public, says `ok` (Fly's check uses it).
-- `/api/status` everything on the board as JSON. `/api/history?id=pack` the raw
-  samples for one dashboard. `/api/check-now` (POST) runs a cycle right away.
-  All three need the sign-in cookie.
-
-## How a dashboard is checked
-
-Each entry in `dashboards.json` may have a `health` block:
-
-```json
-{
-  "id": "pack", "name": "Pack", "url": "https://ardenpack.fly.dev/", "group": "Floor boards",
-  "blurb": "Pack board: orders, handling units and open deliveries from SAP.",
-  "health": {
-    "url": "https://ardenpack.fly.dev/api/health",
-    "expect": { "status": [200], "json": { "ok": true } },
-    "slowMs": 3000,
-    "fields": [
-      { "label": "Warehouse tasks", "path": "feed.wh.rows", "kind": "count" },
-      { "label": "Tasks read", "path": "feed.wh.readAt", "kind": "time", "staleMin": 30 }
-    ]
-  }
-}
-```
-
-- `expect.status` the answers that count as alive (default `[200]`).
-  `expect.text` the exact body (ardenot's `/health` says `ok`).
-  `expect.json` keys that must have these values (`"mode": "cloud"` is fine too).
-- `fields` are read out of a JSON answer and shown on the card. `kind` is
-  `count`, `time`, `text` or `bool`. A `time` with `staleMin` turns the card
-  **STALE** when it is older than that, or missing. A `count` with `min` goes
-  STALE below it.
-- `slowMs` the answer time above which the card is **SLOW** (default 3000).
-- `auth.bearerEnv` the name of an environment variable holding a key to send
-  as `Authorization: Bearer`. `auth.basicEnv` the same for `user:password`.
-- `data` an optional second request for what the dashboard holds when that lives
-  behind a key: same `url`, `auth`, `fields` and `tz` keys. With no key set the
-  request is skipped and the card says so; with a failed request the card is STALE,
-  not DOWN, because the site itself answered.
-- `tz` how to read a time like `2026-10-28 09:15` with no zone (the kiosk's form).
-  Default `America/New_York`.
-
-An entry with no `health` block is a plain link tile. An entry with no `url` is a
-tile with no link, so a dashboard can be listed before it has an address.
-
-States, worst first: **down** (no answer, wrong status, wrong body), **stale**
-(answered, data too old), **slow** (answered, slowly), **up**. The home page pill
-and the board use the same answer, so they never disagree.
-
-What the board quantifies, per dashboard, from one minute-by-minute history:
-answer time now, p50 and p95 over 24 hours, reachable % over 24 hours and 7 days,
-fresh % over 7 days where the dashboard has data fields, outages in 7 days,
-how long it has been in its current state, certificate days left, a 24-hour strip
-(one cell per 10 minutes, worst state in the cell), a 24-hour answer-time line,
-and the list of every state change.
-
-## Setting it up on Fly (once)
-
-From this folder on a PC with `fly` signed in:
+## How the modules fit
 
 ```
-fly apps create arden-hub
-fly volumes create hub_data --size 1 --region iad -a arden-hub
-node tools/make-secrets.js "2468"        (paste the line it prints)
-fly deploy --remote-only --ha=false -a arden-hub
+browser ──► arden-hub (8080, the PIN door)
+               ├── /                 Shift home       (hub)
+               ├── /ship /people /improve /system     (hub)
+               ├── /stage/...  ───►  Staging Lane Health child, 127.0.0.1:8481, data /data/stage
+               └── /pack/...   ───►  Arden Pack child,          127.0.0.1:8482, data /data/pack
+SAP host PC ──► /stage/api/ingest, /stage/api/backup/*, /stage/api/feeder   (key: HUB_STAGE_KEY)
+SAP host PC ──► /pack/api/drop                                              (key: HUB_PACK_KEY)
 ```
 
-Secrets:
+The push doors need no hub cookie; each module checks its own key exactly as
+it did as a separate app. Everything else under `/stage` and `/pack` needs the
+PIN cookie. The modules' own viewer passwords stay unset.
+
+A module that dies is started again (2 s, then doubling to a minute between
+tries); while it is down its pages say so and the Shift card for it goes grey.
+`/api/system` shows pid, uptime and restarts for both.
+
+## Secrets on Fly
 
 | Secret | What | Needed |
 |---|---|---|
+| `HUB_STAGE_KEY` | the ingest secret the SAP PC sends with every push to `/stage` (same value as "Ingest secret" in Staging Lane Health's settings on the host PC) | yes, or the Stage, Pick and Ship numbers never arrive |
+| `HUB_PACK_KEY` | the key in `pack.txt` on the SAP PC | yes, or the Pack numbers never arrive |
 | `HUB_PASSPHRASE_HASH` | scrypt hash of the PIN, from `tools/make-secrets.js` | no: without it the PIN is `HUB_PIN`, and without that **2468** |
 | `HUB_SESSION_SECRET` | signs the sign-in cookie | no: made once and kept on the volume |
-| `HUB_KEY_ARDENOT` | optional, not used by default: a dashboard-PC key from ardenot, so the board can also show the kiosk's data revision, roster age and sheets waiting to print | no |
-
-The overtime tile checks reachability only (`/health`). To also read what the
-kiosk holds, add a `data` block to its entry in `dashboards.json`:
-
-```json
-"data": {
-  "url": "https://ardenot.fly.dev/api/hub?op=ping",
-  "auth": { "bearerEnv": "HUB_KEY_ARDENOT" },
-  "tz": "America/New_York",
-  "fields": [
-    { "label": "Kiosk data rev", "path": "rev", "kind": "count" },
-    { "label": "Last kiosk sync", "path": "at", "kind": "time" },
-    { "label": "Roster rev", "path": "roster", "kind": "count" },
-    { "label": "Roster published", "path": "rosterAt", "kind": "time" },
-    { "label": "Sheets waiting to print", "path": "pending", "kind": "count" }
-  ]
-}
-```
-
-and make the key by pairing the hub with ardenot like a dashboard PC does
-(the key is shown once; only its hash is kept there):
 
 ```
-curl -s -X POST https://ardenot.fly.dev/api/agent/pair -H "Content-Type: application/json" \
-  -d "{\"passphrase\":\"<the kiosk passphrase>\",\"name\":\"Arden Hub\",\"role\":\"monitor\"}"
-fly secrets set -a arden-hub HUB_KEY_ARDENOT=<the key from the answer>
+fly secrets set -a arden-hub HUB_STAGE_KEY=<ingest secret> HUB_PACK_KEY=<pack key>
 ```
 
-The key can only call `ping`, `next` and `jobs` on ardenot; it cannot read
-sign-ups. Forget it any time from `ardenot.fly.dev/deploy`.
+## Pointing the SAP host PC at the hub (the cutover)
 
-After the first deploy, every push to `main` deploys again
-(`.github/workflows/deploy.yml`). That needs the repository secret
-`FLY_API_TOKEN` to be allowed to deploy `arden-hub` (an org deploy token is;
-a token made only for the `ardenot` app is not).
+1. **Staging Lane Health** on the host PC: Settings, "Cloud copy and login".
+   Cloud copy address `https://arden-hub.fly.dev/stage`, ingest secret the same
+   value as `HUB_STAGE_KEY`, push on. The next push lands within a minute; the
+   Stage card on Shift and the feed pill on `/stage/tv` go green.
+2. **Arden Pack** on the host PC: edit `pack.txt` beside `Start Arden Pack.cmd`:
+   ```
+   url: https://arden-hub.fly.dev/pack
+   key: <the same value as HUB_PACK_KEY>
+   ```
+   and start it again. `/pack/api/health` shows the row counts climbing.
+3. Watch `/system` for an hour. The two "Old ... cloud copy" cards in
+   `dashboards.json` can be removed once the old apps are switched off.
+
+Until a push arrives the cards say what they are waiting on; nothing errors.
 
 ## Running it on a PC
 
 ```
 set HUB_DEV=1
+set HUB_DEMO=1
 node server.js
 ```
 
-Then open http://localhost:8080. `HUB_DEV=1` means plain http and the cookie is
-not marked Secure; never set it on Fly. History goes to `./data` (ignored by git).
+Then open http://localhost:8080 and sign in with 2468. `HUB_DEV=1` is plain
+http (never set it on Fly). `HUB_DEMO=1` makes both modules read the sample
+exports in `modules/stage/sample-data` instead of waiting for a push, so every
+page has lanes and orders on it. Data goes to `./data` (ignored by git).
 
-## Adding or changing a dashboard
+Other knobs: `PORT`, `DATA_DIR`, `HUB_CONFIG` (another `dashboards.json`),
+`HUB_STAGE_PORT` and `HUB_PACK_PORT` (the children's ports, for running two
+hubs on one PC).
 
-Edit `dashboards.json`, run `node test/test-server.js`, push. The server refuses
-to start if the file is not valid JSON or two entries share an id, so a typo
-cannot take the hub down silently: the deploy fails and the old copy keeps running.
+## Deploying
+
+Every push to `main` runs the tests and deploys
+(`.github/workflows/deploy.yml`); it needs the repository secret
+`FLY_API_TOKEN`. By hand:
+
+```
+fly deploy --remote-only --ha=false -a arden-hub
+```
+
+First time only: `fly apps create arden-hub`, `fly volumes create hub_data --size 1 --region iad -a arden-hub`.
+
+## The System board
+
+Each entry in `dashboards.json` may have a `health` block: the address to ask,
+what counts as alive (`expect.status`, `expect.text`, `expect.json`), `slowMs`,
+`fields` read out of a JSON answer (`count`, `time` with `staleMin`, `text`,
+`bool`), an optional keyed `data` request (`auth.bearerEnv`) and `tz` for
+zone-less times. States, worst first: **down**, **stale**, **slow**, **up**.
+Per dashboard the board shows answer time now, p50 and p95 over 24 h,
+reachable % over 24 h and 7 days, fresh % where there are data fields, outages
+in 7 days, time in the current state, certificate days left, a 24 h strip and
+an answer-time line, and every state change. A check that gets no answer is
+tried once more before the card goes down.
 
 ## Where it lives
 
-This is its own repository, `brenemanandrew/arden-hub`. It began life as the
-`arden-hub/` folder of the ardenot repository and shares that server's
-conventions, but nothing here depends on ardenot's code.
+Its own repository, `brenemanandrew/arden-hub`. The modules are copies of the
+upstream programs with the one local change listed in `modules/UPSTREAM.md`;
+taking a new build is a folder swap.

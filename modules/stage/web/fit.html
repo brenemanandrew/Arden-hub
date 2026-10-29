@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Staging Lane Health</title>
+<style>
+  /* The classic board draws itself in viewport units, so its look depends on
+     the screen it lands on: a laptop, a 4K set and a TV with a browser bar
+     each got a different board. This page gives it one screen to draw on, a
+     fixed 1920x1080 frame, scaled to fit whatever is really there and
+     centred. Every display then shows the same board, only bigger or
+     smaller. ?stage=WxH picks another frame size; ?fit=0 on /board skips
+     the frame altogether. */
+  html,body{ height:100%; margin:0; overflow:hidden; background:#fff; }
+  #stage{ position:absolute; left:0; top:0; transform-origin:top left; }
+  #stage iframe{ display:block; border:0; width:100%; height:100%; background:transparent; }
+</style>
+</head>
+<body>
+<div id="stage"><iframe id="frame" title="Staging Lane Health board" allow="fullscreen; screen-wake-lock" allowfullscreen></iframe></div>
+<script>
+(function(){
+  const q = new URLSearchParams(location.search);
+  /* A phone gets the one-column board instead of a wall board shrunk to a
+     thumbnail. Being small is not enough to be a phone: a Fire TV's browser
+     reports its screen as a few hundred CSS pixels a side, and every TV that
+     reloaded was handed the phone page. So a phone is small AND touch AND
+     not a television - the same TV signature kiosk.js goes by. ?phone=0
+     keeps the frame regardless; ?tv=1 says television regardless. */
+  function isPhone(ua, w, h, touch, query){
+    if(query.get('phone') === '0') return false;
+    if(query.get('tv') === '1' || query.get('kiosk') === '1') return false;
+    if(/Silk|AFT[A-Z0-9]{2,}|SMART-TV|SmartTV|Tizen|Web0S|BRAVIA|CrKey|GoogleTV|Roku/i.test(ua || '')) return false;
+    const short = Math.min(w || 0, h || 0);   // a hidden or headless window reports 0, and that is not a phone
+    return short > 0 && short <= 600 && touch > 0;
+  }
+  window.SLH_isPhone = isPhone;   // reachable from the console, so a doubtful screen can be asked why
+  if(isPhone(navigator.userAgent, screen.width, screen.height, navigator.maxTouchPoints || 0, q)){
+    location.replace('/ops' + location.hash); return;
+  }
+  const m = /^(\d{3,5})x(\d{3,5})$/.exec(q.get('stage') || '');
+  const W = m ? +m[1] : 1920, H = m ? +m[2] : 1080;
+  const stage = document.getElementById('stage'), frame = document.getElementById('frame');
+  stage.style.width = W + 'px'; stage.style.height = H + 'px';
+  let fw = 0, fh = 0;
+  function fit(){
+    fw = innerWidth; fh = innerHeight;
+    const k = Math.min(innerWidth / W, innerHeight / H);
+    stage.style.transform = 'translate(' + Math.max(0, (innerWidth - W * k) / 2) + 'px,' + Math.max(0, (innerHeight - H * k) / 2) + 'px) scale(' + k + ')';
+  }
+  addEventListener('resize', fit); addEventListener('orientationchange', fit); fit();
+  /* the board itself, told it is inside the frame so the server hands over
+     the raw page; the query and the #view= hash pass straight through */
+  q.set('frame', '1');
+  frame.src = '/board?' + q.toString() + location.hash;
+  /* Keep the address bar honest and the surround in step with the board:
+     a view change inside is a bookmarkable link outside, the letterbox
+     takes the board's own background (white, or dark when dark mode is on),
+     and a link that leaves the board is followed out of the frame. */
+  let bg = '';
+  function sync(){
+    // a TV going full screen does not always say so with a resize event
+    if(innerWidth !== fw || innerHeight !== fh) fit();
+    let w, d; try{ w = frame.contentWindow; d = frame.contentDocument; }catch(e){ return; }
+    if(!w || !d || !d.body) return;
+    const loc = w.location;
+    if(loc.origin !== location.origin) return;
+    if(loc.pathname !== '/board'){ location.replace(loc.href); return; }
+    if(loc.hash !== location.hash) history.replaceState(null, '', location.pathname + location.search + loc.hash);
+    if(d.title && d.title !== document.title) document.title = d.title;
+    const c = getComputedStyle(d.body).backgroundColor;
+    if(c && c !== bg){ bg = c; document.body.style.background = c; }
+  }
+  frame.addEventListener('load', sync);
+  setInterval(sync, 1000);
+  addEventListener('hashchange', () => { try{ if(frame.contentWindow.location.hash !== location.hash) frame.contentWindow.location.hash = location.hash; }catch(e){} });
+})();
+</script>
+<!-- TVs: full screen and stay awake are asked for here, on the frame, so the whole stage scales -->
+<script src="/web/kiosk.js"></script>
+</body>
+</html>

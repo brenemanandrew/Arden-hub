@@ -1,0 +1,16 @@
+{
+  "name": "staging-lane-health",
+  "version": "1.0.0",
+  "description": "Staging Lane Health host application: pulls SAP EWM exports, keeps history, and serves the lane board and data over the LAN.",
+  "private": true,
+  "main": "server/main.js",
+  "scripts": {
+    "start": "node server/main.js",
+    "dev": "node server/main.js --report-dir sample-data --port 8480 --no-pull",
+    "test": "node test/run.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED"
+}

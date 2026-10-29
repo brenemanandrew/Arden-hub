@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Staging Lane Health - Data</title>
+<link rel="stylesheet" href="/web/board2.css">
+<style>
+  .lanes td:first-child{ font-weight:700; }
+  .age-y{ background:var(--fresh); } .age-o{ background:var(--warn); color:#0b0b0b; } .age-r{ background:var(--crit); color:#fff; }
+</style>
+</head>
+<body>
+<div class="bar" data-page="data" data-sub="Get the data" data-tools="reset"></div>
+<main class="wrap">
+  <p class="hint">Everything the board sees, as files anyone can open. No SAP login, no copy and paste. Links refresh every time the host pulls.</p>
+
+  <h2 class="ch">Downloads</h2>
+  <div class="box" id="downloads">
+    <div class="dl"><div><div class="n">Lane summary</div><div class="m">One row per lane: totes, orders, oldest tote, hours staged, picks complete. What the board is showing right now.</div></div><a class="btn primary" href="/api/export/lanes.csv">CSV</a><a class="btn" href="/api/export/lanes.json">JSON</a><span></span></div>
+    <div class="dl"><div><div class="n">HU staging export</div><div class="m" id="mStage">the full SAP handling unit report</div></div><a class="btn primary" href="/api/export/staging.csv">CSV</a><a class="btn" href="/api/export/staging.json">JSON</a><a class="btn" id="xStage" href="/files/HU STAGING.XLSX">Original XLSX</a></div>
+    <div class="dl"><div><div class="n">Orders export</div><div class="m" id="mOrders">the open orders report with picking status</div></div><a class="btn primary" href="/api/export/orders.csv">CSV</a><a class="btn" href="/api/export/orders.json">JSON</a><a class="btn" id="xOrders" href="/files/Orders.XLSX">Original XLSX</a></div>
+    <div class="dl"><div><div class="n">Warehouse task export</div><div class="m" id="mWh">pick tasks with confirmation times</div></div><a class="btn primary" href="/api/export/whtask.csv">CSV</a><a class="btn" href="/api/export/whtask.json">JSON</a><a class="btn" id="xWh" href="/files/WHTask.XLSX">Original XLSX</a></div>
+    <div class="dl"><div><div class="n">Dwell log</div><div class="m" id="mDwell">every tote that left a lane: when it was staged, when it cleared, minutes in staging</div></div><a class="btn primary" href="/api/export/dwell.csv">CSV</a><a class="btn" href="/api/export/dwell.json">JSON</a><span></span></div>
+    <div class="dl"><div><div class="n">Lane usage</div><div class="m">share of refreshes each lane held a tote</div></div><a class="btn primary" href="/api/export/usage.csv">CSV</a><a class="btn" href="/api/export/usage.json">JSON</a><span></span></div>
+  </div>
+
+  <h2 class="ch">Live link for Excel or Power BI</h2>
+  <p>In Excel: <b>Data</b> tab, <b>From Web</b>, paste one of these, then refresh whenever you like. The address always returns the current data.</p>
+  <div class="box" id="links"></div>
+
+  <h2 class="ch">Shift reports</h2>
+  <div class="box" id="reports">none yet</div>
+
+  <h2 class="ch">Lanes right now</h2>
+  <div class="box"><table class="lanes" id="laneTable"><thead><tr><th>Lane</th><th class="num">Totes</th><th>Orders</th><th>Oldest staged</th><th class="num">Hours</th><th>Picks</th></tr></thead><tbody></tbody></table></div>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+const $ = id => document.getElementById(id);
+function fmt(ms){ if(!ms) return '-'; const d = new Date(ms); return d.toLocaleDateString(undefined, { month:'numeric', day:'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' }); }
+function kb(n){ return n == null ? '' : (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.round(n / 1024) + ' KB'); }
+async function status(){
+  const r = await fetch('/api/status', { cache:'no-store' }); const st = await r.json();
+  const f = st.files || {};
+  const line = (x, what) => x.status === 'ok' ? (x.name + ', written ' + fmt(x.mtime) + ', ' + x.rows + ' rows, ' + kb(x.size)) : (what + ': ' + (x.status || 'not loaded') + (x.error ? ' - ' + x.error : ''));
+  $('mStage').textContent = line(f.stage || {}, 'HU staging'); $('mOrders').textContent = line(f.orders || {}, 'orders'); $('mWh').textContent = line(f.wh || {}, 'warehouse tasks');
+  if(f.stage && f.stage.name) $('xStage').href = '/files/' + encodeURIComponent(f.stage.name);
+  if(f.orders && f.orders.name) $('xOrders').href = '/files/' + encodeURIComponent(f.orders.name);
+  if(f.wh && f.wh.name) $('xWh').href = '/files/' + encodeURIComponent(f.wh.name);
+  const base = location.origin;
+  $('links').innerHTML = ['lanes', 'staging', 'orders', 'whtask', 'dwell'].map(k => '<div class="row"><code>' + base + '/api/export/' + k + '.csv</code><button class="btn" onclick="copy(\'' + base + '/api/export/' + k + '.csv\')">Copy</button></div>').join('');
+}
+async function reports(){
+  const r = await fetch('/api/reports', { cache:'no-store' }); const j = await r.json();
+  $('reports').innerHTML = j.reports.length ? j.reports.map(x => '<div class="dl"><div><div class="n">' + x.name + '</div><div class="m">' + fmt(x.mtime) + ', ' + kb(x.size) + '</div></div><a class="btn primary" href="' + x.url + '">Download</a><span></span><span></span></div>').join('')
+    : "No shift reports saved yet. They are written automatically on the host PC a few minutes after each shift ends (or by pressing the ! marker on the host's board to add the floor's answers), and a week-in-review one-pager is written on Monday for the week just finished.";
+}
+async function lanes(){
+  const r = await fetch('/api/lanes', { cache:'no-store' }); const j = await r.json();
+  const tb = $('laneTable').querySelector('tbody');
+  const dwell = await fetch('/api/export/dwell.json').then(r => r.json()).catch(() => null);
+  if(dwell) $('mDwell').textContent = (dwell.completed || []).length + ' cleared totes in the log, ' + Object.keys(dwell.open || {}).length + ' currently tracked';
+  tb.innerHTML = (j.lanes || []).filter(l => !l.d8).map(l => {
+    const cls = l.ageHours >= 2 ? 'age-r' : l.ageHours >= 1 ? 'age-o' : 'age-y';
+    return '<tr><td>' + l.bin + '</td><td class="num">' + l.totes + '</td><td>' + l.documents.join(', ') + '</td><td>' + fmt(l.oldest) + '</td><td class="num ' + cls + '">' + l.ageHours.toFixed(1) + '</td><td>' + (l.picksComplete == null ? '' : l.picksComplete ? 'complete' : 'open') + '</td></tr>';
+  }).join('') || '<tr><td colspan="6">No lanes loaded yet.</td></tr>';
+}
+function copy(t){ navigator.clipboard.writeText(t).then(() => toast('Copied')).catch(() => toast(t)); }
+function toast(m){ const t = $('toast'); t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 1500); }
+function all(){ status().catch(() => {}); reports().catch(() => {}); lanes().catch(() => {}); }
+all();
+try{ const es = new EventSource('/api/events'); es.addEventListener('data', all); }catch(e){}
+setInterval(all, 60000);
+</script>
+<script src="/web/theme.js"></script>
+<script src="/web/board2.js"></script>
+<script>(function(){ const ids = window.SLH.wrapSections('main.wrap'); window.SLH.initModules('data', [ids]); })();</script>
+</body>
+</html>

@@ -53,3 +53,14 @@ staging-lane-health, ops facts, session log).
   it six seconds because the machine auto-stops and wakes on the first hit.
 - Fly app names cannot contain spaces: "Arden hub" is `arden-hub`, so the
   address is `https://arden-hub.fly.dev`.
+
+## Added in version 2 (modules inside the hub)
+
+| Lesson | Where it came from | What the hub does |
+|---|---|---|
+| A proxy must drop hop-by-hop headers. Passing the child's `Transfer-Encoding` through beside a fresh `Content-Length` makes `fetch` (undici) refuse the reply while curl shrugs. | The first v2 test run. | `lib/modules.js` strips `content-length`, `transfer-encoding`, `connection` and `keep-alive` before answering. |
+| A supervisor must take its children with it. A crashed hub left two children holding the ports, and the next start looped on `EADDRINUSE`. | The test suite. | `process.on('exit')` kills the children; `stop()` sends SIGTERM then SIGKILL after 3 s. |
+| Never recompute a number a module already shows. | The ops pick-side card versus the pickers page, again. | Shift repeats the modules' own figures and says, per card, where each one came from. |
+| Rewrite links at the edge, not in the upstream. | Staging Lane's pages are full of root-absolute `/web/` and `/api/` paths. | One regex over text answers, keyed on the module's known top-level routes, so a lane name in a string is left alone. |
+| Wall TVs do not want navigation. | `?tv=1`, the quad panels, the phone view. | Those views and any iframe load are served bare. |
+| The push kit on the SAP PC must not change shape. | Thirty minutes of someone's time at the host PC per change. | The modules' push doors keep their paths and keys under `/stage` and `/pack`; the cutover is one address per program. |

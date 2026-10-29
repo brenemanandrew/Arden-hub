@@ -6,3 +6,5 @@ data
 *.log
 node_modules
 .git
+modules/stage/docs
+modules/stage/sample-data/*.pptx

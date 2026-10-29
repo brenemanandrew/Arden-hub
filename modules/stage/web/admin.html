@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Staging Lane Health - Admin</title>
+<link rel="stylesheet" href="/web/board2.css">
+<style>
+  .useNode{ font-size:11px; padding:1px 7px; margin-left:8px; vertical-align:middle; }
+  .tree{ max-height:360px; overflow:auto; border:1px solid var(--hair); padding:8px; font-family:Consolas, monospace; font-size:12.5px; }
+  .tree div{ padding:2px 4px; cursor:pointer; white-space:nowrap; }
+  .tree div:hover{ background:var(--blue-soft); }
+  .tree .k{ color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="bar" data-page="admin" data-sub="Settings" data-tools="reset"></div>
+<main class="wrap">
+
+  <div class="status-card">
+    <div class="pill"><span class="dot" id="dot"></span><span id="stText">Connecting</span></div>
+    <div class="sub" id="stSub"></div>
+    <div class="row" data-host-only>
+      <button class="btn primary" id="bStart">START pull</button>
+      <button class="btn" id="bNow">Pull now</button>
+      <button class="btn danger" id="bStop">STOP pull</button>
+      <button class="btn" id="bProbe">Check SAP</button>
+      <button class="btn" id="bWt" title="Run only the warehouse task export once and watch the Pull log">Test task pull</button>
+      <button class="btn" id="bPack" title="Export what is standing at the pack benches - the same handling unit report, asked for the PK bins">Pull pack benches</button>
+      <button class="btn" id="bReread">Re-read folder</button>
+    </div>
+  </div>
+
+  <div class="tabs" data-host-only>
+    <button class="on" data-pane="status">Status</button>
+    <button data-pane="log">Pull log</button>
+    <button data-pane="picking">Picking</button>
+    <button data-pane="review">Review</button>
+    <button data-pane="tv">Floor TV</button>
+    <button data-pane="backfill">History</button>
+    <button data-pane="backup">Backup</button>
+    <button data-pane="config">SAP pull</button>
+    <button data-pane="tree">Monitor tree</button>
+    <button data-pane="help">Setup</button>
+  </div>
+
+  <div class="pane on" id="pane-status">
+    <h2 class="ch">From afar</h2>
+    <div class="box" id="remoteBox">
+      <p class="sub" id="remoteNote">Tell the host PC what to do without being at it. On the cloud copy these are queued and the host picks them up with its next push - within a minute if it is running at all. If it is not running, nothing here can reach it: that is what the keep-alive task on the host is for.</p>
+      <div class="row" id="remoteBtns"></div>
+      <div class="hint" id="remoteState" style="margin-top:6px"></div>
+    </div>
+    <h2 class="ch">Service</h2><div class="box kv" id="kvServer"></div>
+    <h2 class="ch" data-host-only>SAP pull</h2><div class="box kv" id="kvPull" data-host-only></div>
+    <h2 class="ch" id="filesHead">Files in the report folder</h2>
+    <div class="box"><table id="tFiles"><thead><tr><th>File</th><th>Status</th><th>Written</th><th class="num">Size</th><th class="num">Rows</th><th>Note</th></tr></thead><tbody></tbody></table></div>
+  </div>
+
+  <div class="pane" id="pane-picking">
+    <h2 class="ch">Pick standards</h2>
+    <div class="box">
+      <p class="hint">Your standard rate for each pick area, one per line, for example <code>Flow = 37</code>.
+        An area with no line of its own falls back to the <code>Other</code> value. Everything any page calls a
+        target comes from here. The picker page can work out what this crew is actually achieving &mdash;
+        <b>Recommended standards</b> there &mdash; and you type the result in here.</p>
+      <textarea id="tgtText" spellcheck="false" style="min-height:150px"></textarea>
+      <div class="row" style="margin-top:10px">
+        <label class="f">Count a picker active for (minutes)<input id="tgtWindow" type="number" min="5" max="240" step="5"></label>
+        <label class="f">Counts as a picker from this many picks<input id="tgtMin" type="number" min="0" max="1000"></label>
+        <label class="f">Paid hours in a shift<input id="tgtShift" type="number" min="1" max="24" step="0.25"></label>
+        <label class="f">True picking hours in a shift<input id="tgtDay" type="number" min="1" max="24" step="0.25"></label>
+      </div>
+      <div class="row">
+        <label class="f">Productive time reads green from (%)<input id="tgtProd" type="number" min="0" max="100" step="5"></label>
+        <label class="f">Percent of standard reads green from (%)<input id="tgtBandGood" type="number" min="1" max="300" step="1"></label>
+        <label class="f">&hellip; and amber from (%)<input id="tgtBandWarn" type="number" min="0" max="300" step="1"></label>
+        <label class="f">Leave these user IDs off the board<input id="tgtHide" class="wide" placeholder="comma separated"></label>
+      </div>
+    </div>
+
+    <h2 class="ch" style="margin-top:22px">The working week</h2>
+    <div class="box">
+      <label class="f" style="display:block">One shift per line
+        <textarea id="tgtSchedule" spellcheck="false" style="min-height:84px"></textarea></label>
+      <p class="hint" style="margin-top:6px">Days, a name, start to end, then the breaks as clock time = minutes.
+        Shifts, breaks and closed hours all come from this: breaks and closed time are taken out of active time,
+        and a shift ending earlier than it starts runs past midnight.
+        Add <code>setup 20</code> for the minutes at the <b>start</b> of a shift spent getting a truck, a scanner
+        and a pick list &mdash; written once per shift, so second shift gets its own without typing a clock time.
+        It is <b>drawn in orange, not taken out of anybody&rsquo;s time</b>: a good number of picks land in those
+        minutes, and removing the time while keeping the picks would hand somebody a rate they did not work for.<br>
+        Example: <code>Mon-Fri 1st 07:00-15:30 setup 20 breaks 09:30=30, 11:30=50, 13:30=30</code>.
+        Blank puts the built-in week back; the word <code>none</code> turns the schedule off.</p>
+    </div>
+
+    <h2 class="ch" style="margin-top:22px">What counts as a delivery line</h2>
+    <div class="box">
+      <label class="f" style="display:block">A delivery line is identified by these task columns
+        <input id="tgtLine" class="wide" placeholder="blank = one warehouse task counts as one line"></label>
+      <p class="hint" id="colHint" style="margin:6px 0 4px"></p>
+      <span id="colChips" class="chips"></span>
+      <p class="hint" style="margin-top:8px"><b>Changing this changes what a pick means</b>, so numbers either
+        side of the change are not comparable. The review says so on any window that straddles it.</p>
+    </div>
+
+    <div class="row" style="margin-top:14px"><button class="btn primary" id="tgtSave">Save picking settings</button><span class="hint" id="tgtMsg"></span></div>
+  </div>
+
+  <div class="pane" id="pane-review">
+    <h2 class="ch">Performance review</h2>
+    <div class="box">
+      <p class="hint">The review page only. Everything else on it is the same arithmetic as the picker board.</p>
+      <div class="row">
+        <label class="f">Windows, in worked days (up to four)<input id="rvWindows" placeholder="5, 10, 15, 20"></label>
+        <label class="f">A day counts as picking from (hours)<input id="rvMinHours" type="number" min="0" max="12" step="0.25"></label>
+        <label class="f">Compare a picker only from this share of the days (%)<input id="rvPeerShare" type="number" min="0" max="100" step="5"></label>
+        <label class="f">Productive time over 100%<select id="rvCapProd"><option value="1">hold at 100%</option><option value="0">show it (110%)</option></select></label>
+      </div>
+    </div>
+
+    <h2 class="ch" style="margin-top:22px">What SAP&rsquo;s activity codes mean</h2>
+    <div class="box">
+      <label class="f" style="display:block">One <code>CODE = words</code> to a line
+        <textarea id="rvActs" spellcheck="false" style="min-height:120px"></textarea></label>
+      <p class="hint" style="margin-top:6px">The review says what somebody was doing when they were not picking.
+        A code with no line here shows as <b>the code</b> rather than as a guess, because a review page that
+        mislabels somebody&rsquo;s work is worse than one that makes you ask what <code>DPUT</code> means.</p>
+    </div>
+
+    <div class="row" style="margin-top:14px"><button class="btn primary" id="rvSave">Save review settings</button><span class="hint" id="rvMsg"></span></div>
+  </div>
+
+  <div class="pane" id="pane-tv">
+    <h2 class="ch" style="margin-top:22px">Floor TV</h2>
+    <div class="box">
+      <p class="hint">The delivery-line goal the classic board counts towards. It used to be typed
+        on the wall panel itself, which meant a passing finger could move the floor's target and
+        nobody would know who did it or when. It is set here now and the board only reads it.</p>
+      <div class="row">
+        <label class="f">Delivery lines a day<input id="tvGoal" type="number" min="1" max="100000" step="50"></label>
+        <button class="btn primary" id="tvSave" style="align-self:flex-end">Save</button>
+        <span class="hint" id="tvMsg" style="align-self:flex-end"></span>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="pane" id="pane-backfill">
+    <h2 class="ch">One-time history backfill</h2>
+    <div class="box">
+      <p class="hint" style="line-height:1.5">
+        Runs the warehouse task export over past days and files every day it finds into the history, so the week, month
+        and year views have something behind them. <b>The full year is meant to be run once</b> - about an hour of driving
+        SAP, when the floor is quiet; it carries on from where it stopped if SAP drops out, and refuses to be run twice.
+        A day already on file is only replaced when this finds more picks for it. The README says how it works.
+      </p>
+      <p class="hint" style="line-height:1.5">
+        <b>Every export asks for four days of creation dates before the first day it files</b>, because a task can sit
+        that long between being created and being picked. So &ldquo;3 days per export&rdquo; asks SAP for seven. That
+        lead-in is paid once per export, which is why very small chunks cost more SAP time rather than less - but a
+        wider window is a bigger file for Excel to write, and a slice that runs out of time is skipped. Around a week
+        is the sweet spot on a floor writing fifteen thousand task rows a day.
+      </p>
+      <div class="row">
+        <button class="btn" id="bfYear" style="align-self:flex-end">Use the full year (365 days)</button>
+        <label class="f">Days back<input id="bfDays" type="number" min="1" max="400" value="30"></label>
+        <label class="f">Days per export<input id="bfChunk" type="number" min="1" max="45" value="7"></label>
+        <label class="f" style="align-self:flex-end"><input id="bfForce" type="checkbox"> Run it again anyway</label>
+        <button class="btn primary" id="bfGo" style="align-self:flex-end">Run the backfill</button>
+      </div>
+      <div id="bfState" class="hint"></div>
+      <table id="bfTable" style="display:none"><thead><tr><th>Day</th><th class="num">Picks</th><th>What happened</th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <h2 class="ch" style="margin-top:22px">History collected elsewhere</h2>
+    <div class="box">
+      <p class="hint">A backfill drives SAP, and this PC has one session, so while it collects
+        a year of warehouse tasks it is not pulling the floor's exports and the board sits still
+        for hours. Another PC can do the collecting against its own SAP session instead
+        — run <b>Collect history elsewhere.cmd</b> there — and the file it writes is taken in here.
+        Nothing stops. A day this PC watched itself is never replaced by a shorter reading of it.</p>
+      <div class="row">
+        <input type="file" id="impFile" accept=".gz,.json">
+        <button class="btn primary" id="impGo">Take it in</button>
+      </div>
+      <div id="impState" class="hint"></div>
+    </div>
+  </div>
+
+  <div class="pane" id="pane-backup">
+    <h2 class="ch">Backups</h2>
+    <div class="box">
+      <p class="hint" style="line-height:1.5">
+        The data folder is copied <b>a few minutes after every shift</b>, <b>when SAP stops answering</b>, <b>when this
+        service stops</b> (closing the window included), <b>when a backfill finishes</b>, <b>before anything is restored</b>
+        over it, and <b>every twelve hours</b> if none of those happened - as well as on request. Every copy goes to the
+        cloud copy, sealed, and to a folder on this PC.
+      </p>
+      <p class="sub">
+        And back the other way: <b>every start</b> asks the cloud copy what it is holding, and if that has more history than
+        this PC does, takes it and merges it in - so a host PC that has been away, or a new one entirely, catches up on its
+        own. A merge keeps every day this PC already had. Moving the host to another PC is copying the folder and starting
+        it; fill in <code>cloud.txt</code> beside the program first (see <code>cloud.txt.example</code>) and there is nothing
+        to type here at all.
+      </p>
+      <div class="kvb" id="kvBackup"></div>
+      <div class="row">
+        <button class="btn primary" id="bkNow">Back up now</button>
+        <button class="btn" id="bkPull">Pull the newest backup from the cloud copy</button>
+      </div>
+      <div id="bkState" class="hint" style="margin-top:8px"></div>
+      <div class="row" style="margin-top:14px">
+        <label class="f">Backups folder<input class="wide" id="bkDir" placeholder="blank = keep them in the data folder on this PC"></label>
+        <label class="f">Reports folder<input class="wide" id="bkRep" placeholder="blank = the shift decks stay in the data folder"></label>
+        <button class="btn" id="bkSave" style="align-self:flex-end">Save folders</button>
+      </div>
+      <h2 class="ch" style="margin-top:14px">Backups in the folder</h2>
+      <table id="bkList"><thead><tr><th>File</th><th>Taken</th><th class="num">Size</th><th></th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+  <style>
+    .kvb{ display:grid; grid-template-columns:max-content 1fr; gap:4px 14px; font-size:13px; margin:8px 0 12px; }
+    .kvb b{ color:var(--ink-2); font-weight:700; }
+  </style>
+
+  <div class="pane" id="pane-log">
+    <h2 class="ch">Pull log</h2>
+    <div class="box"><pre class="log" id="log">loading</pre><div class="hint">Newest at the bottom. The same lines go to <code id="logPath"></code>.</div></div>
+  </div>
+
+  <div class="pane" id="pane-config">
+    <h2 class="ch">Report folder and files</h2>
+    <div class="box">
+      <div class="row"><label class="f">Report folder<input class="wide" id="cReportDir"></label></div>
+      <div class="row">
+        <label class="f">HU staging file<input id="cStage"></label>
+        <label class="f">Orders file<input id="cOrders"></label>
+        <label class="f">Warehouse task file<input id="cWh"></label>
+      </div>
+      <div class="hint">SAP writes into this folder; the service reads from it. Anything that already writes here (the old VBS puller, for example) keeps working with the pull switched off below.</div>
+    </div>
+    <h2 class="ch">SAP pull</h2>
+    <div class="box">
+      <div class="row">
+        <label class="f">Drive SAP from this PC<select id="cEnabled"><option value="true">yes</option><option value="false">no, only read the folder</option></select></label>
+        <label class="f">Driver host<select id="cDriver"><option value="vbs">VBScript (cscript)</option><option value="ps1">PowerShell</option></select></label>
+        <label class="f">Seconds between cycles<input id="cInterval" type="number" min="5"></label>
+        <label class="f">Cycle timeout (s)<input id="cTimeout" type="number" min="60"></label>
+        <label class="f">Pause when nobody watching (min, 0 = never)<input id="cIdle" type="number" min="0"></label>
+        <label class="f" title="A long-running SAP session hoards memory until SAP says it has none left, which is what used to stop the pull overnight. Opening a fresh session and closing the old one hands it back; the login is kept.">Fresh SAP session every (cycles, 0 = never)<input id="cRecycle" type="number" min="0"></label>
+      </div>
+      <div class="row">
+        <label class="f">Warehouse<input id="cWarehouse"></label>
+        <label class="f">Monitor<input id="cMonitor"></label>
+        <label class="f">Order lookback (days)<input id="cLookback" type="number" min="0" max="30"></label><label class="f" title="How many days of task CREATION dates the warehouse task export asks for. A task confirmed today can have been created a fortnight ago, and anything created before this window is simply not in the file.">Task lookback (days)<input id="cWtBack" type="number" min="0" max="30"></label>
+        <label class="f">SAP date format<input id="cDateFormat" placeholder="MM/dd/yyyy"></label>
+      </div>
+      <div class="row">
+        <label class="f">Excel settle (ms)<input id="cSettle" type="number" min="0"></label>
+        <label class="f">Between exports (ms)<input id="cSwitch" type="number" min="0"></label>
+        <label class="f">Bin patterns (comma separated)<input class="wide" id="cBins"></label>
+      </div>
+      <details><summary>Monitor tree nodes (advanced)</summary>
+        <div class="hint">Node keys are positional and can drift when the monitor layout changes. Give a label instead and the driver finds the node by its text; the key is the fallback. Use the Monitor tree tab to look them up.</div>
+        <div class="row">
+          <label class="f">HU node key<input id="nHuKey"></label><label class="f">HU node label<input id="nHuLabel"></label><label class="f">HU expand (comma)<input id="nHuExpand"></label>
+        </div>
+        <div class="row">
+          <label class="f">Orders node key<input id="nOrdKey"></label><label class="f">Orders node label<input id="nOrdLabel"></label><label class="f">Orders expand<input id="nOrdExpand"></label>
+        </div>
+        <div class="row">
+          <label class="f">Task node key<input id="nWtKey"></label><label class="f">Task node label<input id="nWtLabel"></label><label class="f">Task node parent<input id="nWtParent" placeholder="Documents"></label><label class="f">Task expand<input id="nWtExpand"></label>
+        </div>
+      </details>
+    </div>
+    <h2 class="ch">When SAP falls over</h2>
+    <div class="box">
+      <p class="sub">
+        If SAP stops answering, or nothing fresh arrives for the number of minutes below, this PC closes what is left of
+        SAP and opens it again through the Okta tile - which downloads a SAP GUI shortcut that logs itself in - then waits
+        for the session and carries on pulling. It is written to the pull log every time.
+      </p>
+      <div class="row">
+        <label class="f">Restart SAP by itself<select id="rcOn"><option value="true">yes</option><option value="false">no</option></select></label>
+        <label class="f">Nothing fresh for (minutes)<input id="rcStale" type="number" min="2" max="240"></label>
+        <label class="f">At most, per hour<input id="rcMax" type="number" min="0" max="12"></label>
+      </div>
+      <div class="row">
+        <label class="f">Okta app link for SAP<input class="wide" id="rcUrl" placeholder="https://hubbell.okta.com/home/..."></label>
+        <label class="f">Downloads folder (blank = this user's Downloads)<input class="wide" id="rcDir" placeholder="C:\Users\you\Downloads"></label>
+      </div>
+      <div class="row">
+        <label class="f">Button to press on that page (blank = Sign in, Log in, Log on, Continue, Launch)<input class="wide" id="rcBtn" placeholder="Sign in"></label>
+      </div>
+      <div class="hint">
+        The tile usually launches on its own. When it stops on a Sign in button instead, this presses it - buttons only,
+        never a field, so no password is typed. If the wording on your page is something else, put it above; the pull log
+        lists every button it could see each time it tries.
+      </div>
+      <div class="hint">
+        To get the link: open <b>hubbell.okta.com</b> on this PC, find <b>PS1 005 - SCM Production</b>, use the tile's
+        <b>&hellip;</b> menu and copy the app link - not the address of the dashboard itself. Nothing is ever closed until
+        that link is set, because a session this cannot reopen is worse than the crash.
+        <br><br>
+        The tile is the way in every time. Okta issues a new SAP shortcut whenever it feels like it, so the last one it
+        downloaded is only tried again if SAP falls over within a couple of hours, and only for about a minute before the
+        tile is opened anyway. Saving a shortcut by hand is not a way round Okta for the same reason.
+      </div>
+      <div class="hint" id="rcState" style="margin-top:6px"></div>
+      <div class="row"><button class="btn" id="rcNow">Restart SAP now</button><span class="hint" id="rcMsg"></span></div>
+    </div>
+    <h2 class="ch">Control folder, and staying up</h2>
+    <div class="box">
+      <div class="row">
+        <label class="f">Folder the host watches for command files<input class="wide" id="ctlDir" placeholder="G:\My Drive\Staging Lane Health\control"></label>
+      </div>
+      <div class="hint">
+        A folder on this PC that also syncs from somewhere you are - a Google Drive folder works. Drop a file named
+        <b>RESTART SAP.txt</b> (or <b>NO UPDATE.txt</b>), <b>RESTART SERVICE.txt</b>, <b>PULL NOW.txt</b> or <b>BACK UP.txt</b> into it
+        from your phone; the host does it within about fifteen seconds and renames the file to <b>done - ...</b> with what
+        happened inside, which syncs back to you. Blank turns it off. This works even when the cloud copy is the thing that is down.
+      </div>
+      <div class="hint" style="margin-top:8px">
+        <b>Staying up.</b> Run <code>tools\install-keepalive.cmd</code> once on the host and a task checks every five minutes that
+        the service is running, and starts it if not. It pauses itself while Apply update.cmd works. That is the only thing that
+        helps when the service itself has died - nothing above can reach a PC that is not running it.
+      </div>
+    </div>
+    <h2 class="ch">Cloud copy and login</h2>
+    <div class="box">
+      <div class="row">
+        <label class="f">Push to a cloud copy<select id="cCloudOn"><option value="false">off</option><option value="true">on</option></select></label>
+        <label class="f">Cloud copy address<input class="wide" id="cCloudUrl" placeholder="https://your-app.fly.dev"></label>
+        <label class="f">Ingest secret (same value set on the cloud copy)<input class="wide" id="cCloudSecret"></label>
+      </div>
+      <div class="row">
+        <label class="f">Viewer password (blank = none)<input id="cViewerPw" placeholder="what people type to open the board"></label>
+        <label class="f">Trust this network's HTTPS inspection<select id="cInsecure"><option value="false">no, verify certificates</option><option value="true">yes, skip verification</option></select></label>
+      </div>
+      <div class="hint" id="cloudState"></div>
+      <div class="hint">The host pushes the board data to the cloud copy after every change, over outbound HTTPS only, so nothing has to be opened on this PC. The cloud copy is read only; settings and the pull live here.</div>
+    </div>
+    <h2 class="ch">Service</h2>
+    <div class="box">
+      <div class="row">
+        <label class="f">Port<input id="cPort" type="number" min="1" max="65535"></label>
+        <label class="f">Dwell cap (hours)<input id="cCap" type="number" min="1"></label>
+        <label class="f">Dwell log window (days)<input id="cWindow" type="number" min="1"></label>
+        <label class="f">Observation gap (hours)<input id="cGap" type="number" min="0.1" step="0.1"></label>
+        <label class="f">Write legacy status files<select id="cLegacy"><option value="true">yes</option><option value="false">no</option></select></label>
+      </div>
+      <div class="hint">A port change takes effect after the service is restarted. Config file: <code id="cfgPath"></code></div>
+    </div>
+    <div class="row"><button class="btn primary" id="bSave">Save configuration</button><span class="hint" id="saveMsg"></span></div>
+  </div>
+
+  <div class="pane" id="pane-tree">
+    <h2 class="ch">Monitor tree</h2>
+    <div class="box">
+      <p class="hint">Reads every node of the /SCWM/MON tree from the live SAP session so nodes can be chosen by name instead of by recorded position. SAP must be open and logged in on this PC. Click a node to copy its key.</p>
+      <div class="row" style="margin-bottom:8px">
+        <button class="btn primary" id="bFindWt">Pick the task node for me</button>
+        <span class="hint" id="findWtMsg">Several nodes are called Warehouse Task and only the path above them tells them apart: loading tasks hang off the delivery, never off a wave. This reads the tree, picks that one and saves it.</span>
+      </div>
+      <div class="hint" id="findWtOut" style="margin-bottom:8px"></div>
+      <div class="row"><button class="btn primary" id="bTree">Read the tree from SAP</button><span class="hint" id="treeMsg"></span></div>
+      <div class="tree" id="tree"></div>
+    </div>
+  </div>
+
+  <div class="pane" id="pane-help">
+    <h2 class="ch">How this works</h2>
+    <div class="box">
+      <ol style="margin-left:22px; line-height:1.6">
+        <li><b>One PC next to SAP</b> runs this. It pulls from SAP about every minute and shares the site.</li>
+        <li><b>Everyone else</b> just opens the address below. Nothing to install.</li>
+        <li>The numbers themselves are under <b>Review data &rsaquo; Get the data</b>, as files or a link Excel can refresh.</li>
+      </ol>
+      <div class="addr" id="addr" style="margin-top:8px"></div>
+    </div>
+    <h2 class="ch">Host PC setup</h2>
+    <div class="box">
+      <ol style="margin-left:22px; line-height:1.6">
+        <li>Log in to SAP. In SAP Logon: Options, Accessibility &amp; Scripting, Scripting: tick <b>Enable scripting</b> and untick both notification prompts.</li>
+        <li>Run <code>Start Staging Lane Health.cmd</code>. It starts this service and opens this page. Run <code>tools\install-autostart.cmd</code> once to have it start at logon (no admin rights needed).</li>
+        <li>The first time Windows asks whether to allow the service on the network, choose <b>Allow</b> so other PCs can open the board.</li>
+        <li>Give everyone the address from the Home page. That is the whole viewer setup.</li>
+      </ol>
+      <p class="hint">Excel opens each export for a moment because SAP hands the file to it. The service closes that Excel only when it is the sole instance running, so your own spreadsheets are never touched.</p>
+    </div>
+    <h2 class="ch">If something is wrong</h2>
+    <div class="box">
+      <ul style="margin-left:22px; line-height:1.6">
+        <li><b>SAP not reachable</b>: SAP is closed, not logged in, or scripting is disabled. Check SAP Logon options; if scripting is locked, Basis has to enable <code>sapgui/user_scripting</code>.</li>
+        <li><b>Pull failing</b>: read the Pull log tab. Each step names itself when it fails. A node that "did not open" usually means the monitor layout changed: use the Monitor tree tab and set the node by label.</li>
+        <li><b>Wrong file</b> on a status row: the same grid was exported twice under two names. The service keeps the previous good file and says so.</li>
+        <li><b>Viewers cannot connect</b>: the host firewall blocked the port. Allow <code>node.exe</code> for private networks, or run the service on a different port.</li>
+      </ul>
+    </div>
+  </div>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+const $ = id => document.getElementById(id);
+let CFG = null, DEF = null;
+function fmt(ms){ if(!ms) return '-'; const d = new Date(ms); return d.toLocaleDateString(undefined, { month:'numeric', day:'numeric' }) + ' ' + d.toLocaleTimeString(); }
+function ago(ms){ if(!ms) return 'never'; const s = Math.round((Date.now() - ms) / 1000); return s < 60 ? s + 's ago' : s < 3600 ? Math.round(s / 60) + ' min ago' : (Math.round(s / 360) / 10) + ' h ago'; }
+function kb(n){ return n == null ? '' : (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.round(n / 1024) + ' KB'); }
+function toast(m){ const t = $('toast'); t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 1800); }
+function kv(el, pairs){ el.innerHTML = pairs.map(p => '<b>' + p[0] + '</b><span>' + p[1] + '</span>').join(''); }
+
+function render(st){
+  const pu = st.puller || {}, sv = st.server || {};
+  const sapOk = pu.sap && pu.sap.ok;
+  if(sv.mode === 'cloud'){
+    const cl = sv.cloud || {};
+    const ok = cl.receivedAt && (Date.now() - cl.receivedAt) < 30 * 60000;
+    $('dot').className = 'dot ' + (ok ? 'ok' : 'warn'); $('stText').textContent = ok ? 'Live' : 'Not updating';
+    $('stSub').textContent = cl.receivedAt ? 'Updated ' + ago(cl.receivedAt) : 'Waiting for the first update';
+    $('filesHead').textContent = 'Files received';
+    /* one host feeds this copy at a time; say who, and who is waiting to */
+    const sbList = (cl.standby || []).map(x => '<b>' + esc(x.host) + '</b> (asked ' + ago(x.seenAt) + ')').join(', ');
+    kv($('kvServer'), [['This copy', 'the shared one, fed by the warehouse PC'], ['Fed by', (cl.host || '-') + (cl.hostVersion ? ', build <code>' + esc(cl.hostVersion) + '</code>' : '')], ['Last update', cl.receivedAt ? fmt(cl.receivedAt) + ' (' + ago(cl.receivedAt) + ')' : '-'],
+      ['Standing by', sbList ? (sbList + '; a PC standing by takes over if the feeder is quiet for ' + Math.round((cl.leaseMs || 600000) / 60000) + ' minutes') : 'nobody'],
+      ['Version', sv.version], ['Viewers connected', sv.viewers]]);
+    const ff = st.files || {};
+    $('tFiles').querySelector('tbody').innerHTML = ['stage', 'orders', 'wh'].map(k => { const x = ff[k] || {}; const cls = x.status === 'ok' ? 'ok-t' : 'warn-t';
+      return '<tr><td>' + (x.name || k) + '</td><td class="' + cls + '">' + (x.status || '-') + '</td><td>' + (x.mtime ? fmt(x.mtime) + ' (' + ago(x.mtime) + ')' : '-') + '</td><td class="num">' + kb(x.size) + '</td><td class="num">' + (x.rows == null ? '' : x.rows) + '</td><td>' + (x.error || '') + '</td></tr>'; }).join('');
+    return;
+  }
+  let dot = 'ok', text = 'Everything is running';
+  if(!pu.enabled){ dot = 'warn'; text = 'SAP pull is off: reading the folder only'; }
+  else if(pu.driver && pu.driver.available === false){ dot = 'bad'; text = pu.driver.reason; }
+  else if(!sapOk){ dot = 'bad'; text = 'SAP not reachable on this PC' + (pu.sap && pu.sap.detail ? ' (' + pu.sap.detail + ')' : ''); }
+  else if(pu.stopped){ dot = 'warn'; text = 'Pull stopped'; }
+  else if(pu.idle){ dot = 'warn'; text = 'Pull paused, nobody watching'; }
+  else if(pu.running){ dot = 'ok'; text = 'Pulling: ' + (pu.phase || ''); }
+  else if(pu.lastOk === false){ dot = 'bad'; text = 'Last pull failed: ' + (pu.lastError || ''); }
+  $('dot').className = 'dot ' + dot; $('stText').textContent = text;
+  /* when nothing is running, the reason goes first: "next run -" on its
+     own has had somebody watching a log that stopped three days ago */
+  $('stSub').textContent = (pu.why ? pu.why + '  |  ' : '') +
+    'Next run ' + (pu.nextRunAt ? 'in ' + Math.max(0, Math.round((pu.nextRunAt - Date.now()) / 1000)) + 's' : '-') +
+    '  |  ' + sv.viewers + ' viewer(s)  |  newest export ' + ago(st.newestFile);
+  $('bStart').disabled = !pu.stopped && !pu.idle; $('bStop').disabled = !!pu.stopped;
+  const cl = sv.cloud;
+  const cs = $('cloudState');
+  const fhost = x => esc((x && x.host) || 'another PC');
+  if(cs) cs.innerHTML = sv.mode === 'cloud' ? ('This is the cloud copy. Last push from <b>' + (cl && cl.host || '?') + '</b> ' + ago(cl && cl.receivedAt) + (cl && cl.hostVersion ? ', running build <code>' + cl.hostVersion + '</code>' : '') + '.' +
+        (cl && cl.standby && cl.standby.length ? '<br>Standing by: ' + cl.standby.map(x => '<b>' + esc(x.host) + '</b> (asked ' + ago(x.seenAt) + ')').join(', ') + '. They take over if <b>' + fhost(cl.feeder) + '</b> goes quiet for ' + Math.round((cl.leaseMs || 600000) / 60000) + ' minutes.' : ''))
+    : (cl && cl.enabled ? (cl.standby
+        ? ('<span class="bad-t">STANDING BY.</span> <b>' + fhost(cl.standby.feeder) + '</b> is feeding <code>' + cl.url + '</code>, so this PC is not pulling SAP or pushing (since ' + ago(cl.standby.since) + '). It takes over on its own when that PC goes quiet. <button class="btn danger" id="bTakeover">Take over now</button>')
+        : ('Pushing to <code>' + cl.url + '</code>: ' + cl.pushes + ' sent, ' + cl.failures + ' failed, last ok ' + ago(cl.lastOk) + (cl.tls ? ' &middot; TLS: ' + cl.tls : '') + (cl.lastError ? '<br><span class="bad-t">' + cl.lastError + '</span>' : ''))) : 'Not pushing to a cloud copy.');
+  const bt = $('bTakeover');
+  if(bt) bt.onclick = () => { if(confirm('Take over the cloud copy from ' + ((cl.standby.feeder && cl.standby.feeder.host) || 'the other PC') + '? That PC will stop feeding it.')) control('takeover'); };
+  kv($('kvServer'), [['Mode', sv.mode === 'cloud' ? 'cloud copy' : 'host (next to SAP)'], ['Version', sv.version], ['Host', sv.host], ['Addresses', (sv.addresses || []).map(a => '<code>' + a + '</code>').join(' ')], ['Up for', Math.round(sv.uptimeSec / 60) + ' min'], ['Report folder', '<code>' + sv.reportDir + '</code>'], ['Data folder', '<code>' + sv.dataDir + '</code>'], ['Viewers connected', sv.viewers]]);
+  kv($('kvPull'), [['Enabled', pu.enabled ? 'yes' : 'no'], ['State', pu.stopped ? 'stopped' : pu.idle ? 'paused (idle)' : pu.running ? 'running: ' + pu.phase : 'waiting'], ['SAP', sapOk ? 'reachable' + (pu.sap.tcode ? ', in ' + pu.sap.tcode : '') + ' (' + ago(pu.sap.at) + ')' : 'not reachable (' + ago(pu.sap && pu.sap.at) + ')'],
+    ['Cycles', pu.cycles + ' run, ' + pu.failures + ' failed'], ['Last cycle', pu.lastStart ? fmt(pu.lastStart) + ' to ' + (pu.lastEnd ? fmt(pu.lastEnd) : 'now') + (pu.lastOk === false ? ' <span class="bad-t">failed</span>' : pu.lastOk ? ' <span class="ok-t">ok</span>' : '') : 'none yet'],
+    ['Last error', pu.lastError || '-'],
+    ['SAP session', (pu.recycles || 0) + ' fresh session' + (pu.recycles === 1 ? '' : 's') + ' opened' + (pu.memoryPopups ? ', ' + pu.memoryPopups + ' out-of-memory popup' + (pu.memoryPopups === 1 ? '' : 's') + ' (last ' + ago(pu.lastMemoryAt) + ')' : '')], ['Exports', Object.keys(pu.exports || {}).map(f => f + ' ' + ago(pu.exports[f].at) + ' (' + kb(pu.exports[f].bytes) + ')').join('<br>') || '-']]);
+  drawBackfill(st.backfill);
+  drawBackup(st.backup);
+  showRecovery(st);
+  showRemote(st);
+  { const ad = $('addr'); if(ad && st.server) ad.innerHTML = (st.server.addresses || []).map(a => '<code>' + esc(a) + '</code>').join(' or ') + '  (' + st.server.viewers + ' connected now)'; }
+  const f = st.files || {};
+  $('tFiles').querySelector('tbody').innerHTML = ['stage', 'orders', 'wh'].map(k => { const x = f[k] || {}; const cls = x.status === 'ok' ? 'ok-t' : (x.status === 'wrong file' || x.status === 'parse failed') ? 'bad-t' : 'warn-t';
+    return '<tr><td>' + (x.name || k) + '</td><td class="' + cls + '">' + (x.status || '-') + '</td><td>' + (x.mtime ? fmt(x.mtime) + ' (' + ago(x.mtime) + ')' : '-') + '</td><td class="num">' + kb(x.size) + '</td><td class="num">' + (x.rows == null ? '' : x.rows) + '</td><td>' + (x.error || '') + '</td></tr>'; }).join('');
+}
+async function status(){ try{ const r = await fetch('/api/status', { cache:'no-store' }); render(await r.json()); }catch(e){ $('dot').className = 'dot bad'; $('stText').textContent = 'Service not reachable'; } }
+/* Host view shows these buttons on the copy, where the answer is always no.
+   "Could not reach the service" was a lie in that case, so the server's own
+   reason is what gets said. */
+async function control(action){
+  try{
+    const r = await fetch('/api/control', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ action }) });
+    let j = null; try{ j = await r.json(); }catch(e){}
+    if(!r.ok) throw new Error((j && j.error) || ('the service answered ' + r.status));
+    toast('OK: ' + action); status();
+  }catch(e){ toast(e.message || 'Could not reach the service'); }
+}
+$('bStart').onclick = () => control('start'); $('bStop').onclick = () => { if(confirm('Stop pulling from SAP?')) control('stop'); };
+$('bNow').onclick = () => control('pull-now'); $('bProbe').onclick = () => control('probe');
+$('bWt').onclick = () => { control('pull-wt'); document.querySelector('.tabs button[data-pane="log"]').click(); }; $('bPack').onclick = () => { control('pull-pack'); document.querySelector('.tabs button[data-pane="log"]').click(); }; $('bReread').onclick = () => control('reread');
+
+/* The one-time backfill. Progress arrives with the ordinary status
+   payload, so nothing here needs its own stream. */
+function drawBackfill(bf){
+  const state = $('bfState'), tab = $('bfTable');
+  if(!state) return;
+  if(!bf){ state.textContent = 'Not available on this copy.'; $('bfGo').disabled = true; return; }
+  $('bfGo').disabled = !!bf.running;
+  if(bf.running){
+    state.innerHTML = '<b>Running.</b> ' + esc(bf.phase || '') +
+      (bf.tasks ? ' &middot; ' + bf.tasks.toLocaleString() + ' tasks so far' : '') +
+      '<br>Watch the Pull log for what SAP is doing. Leave this alone until it finishes.';
+  } else if(bf.error){
+    state.innerHTML = '<span class="bad-t">Stopped: ' + esc(bf.error) + '</span>' +
+      (bf.written && bf.written.length ? '<br>' + bf.written.filter(d => d.wrote).length + ' day(s) were written before it stopped.' : '');
+  } else if(bf.doneAt){
+    state.innerHTML = '<span class="ok-t">Finished ' + ago(bf.doneAt) + '.</span> ' +
+      bf.tasks.toLocaleString() + ' tasks over ' + bf.days + ' days. ' + esc(bf.note || '');
+  } else {
+    state.textContent = 'Not run yet.';
+  }
+  /* the one-pass marker: what a previous wide pull already covered, so
+     nobody drives SAP over the same year twice by accident */
+  if(bf.base) state.innerHTML += '<br><b>Base on file:</b> ' + bf.base.days + ' days pulled ' +
+    new Date(bf.base.at).toLocaleDateString() + ', ' + esc(bf.base.from) + ' to ' + esc(bf.base.to) +
+    ', ' + bf.base.wrote + ' day(s) of history. Tick the box to run it again.';
+  if(bf.running && bf.resumed) state.innerHTML += '<br>' + bf.resumed + ' export(s) were already collected by an earlier run and are being skipped.';
+  /* windows SAP had nothing for: not a broken run, but worth naming, because
+     the months they cover will be missing from the gallery */
+  if(bf.missed && bf.missed.length){
+    state.innerHTML += '<br><span class="warn-t">' + bf.missed.length + ' window(s) came back with nothing:</span> ' +
+      bf.missed.map(m => esc(m.from) + ' to ' + esc(m.to)).join(', ') +
+      '<br>' + esc(bf.missed[0].why) +
+      '<br>Either SAP has no tasks that far back, or it refused that selection. Pressing the button again retries just those.';
+  }
+  const rows = (bf.written || []);
+  tab.style.display = rows.length ? '' : 'none';
+  if(rows.length) tab.querySelector('tbody').innerHTML = rows.slice().reverse().map(d =>
+    '<tr><td>' + esc(d.day) + (d.partial ? ' <span class="warn-t">short</span>' : '') + '</td>' +
+    '<td class="num">' + (d.picks || 0).toLocaleString() + '</td>' +
+    '<td class="' + (d.wrote ? 'ok-t' : '') + '">' + (d.wrote ? ('written' + (d.note ? ', ' + esc(d.note) : '')) : esc(d.note || 'left alone')) + '</td></tr>').join('');
+}
+/* ---- backups ---- */
+function drawBackup(bk){
+  const kv = $('kvBackup'), st = $('bkState'), tab = $('bkList');
+  if(!kv) return;
+  if(!bk){ kv.innerHTML = ''; st.textContent = 'Not available on this copy.'; $('bkNow').disabled = true; return; }
+  const where = (w, lab) => !w ? '' : '<b>' + lab + '</b><span>' + (w.dir ? esc(w.dir) : '(none)') + ' <span class="' + (w.ok ? 'ok-t' : 'warn-t') + '">' + esc(w.how) + '</span></span>';
+  kv.innerHTML = where(bk.backups, 'Backups go to') + where(bk.reports, 'Reports go to') +
+    '<b>Last backup</b><span>' + (bk.last ? (esc(bk.last.name) + ' - ' + ago(bk.last.at) + ', ' + bk.last.days + ' days of history, ' + Math.round(bk.last.bytes / 1024) + ' KB (' + esc(bk.last.reason) + ')') : 'none yet this run') + '</span>' +
+    '<b>Sent to the cloud copy</b><span>' + (bk.cloudSent ? (esc(bk.cloudSent.name) + ' - ' + ago(bk.cloudSent.at) + (bk.cloudSent.ok ? '' : ' <span class="warn-t">not taken: ' + esc(bk.cloudSent.error) + '</span>')) : 'nothing yet this run (goes up with each backup when the cloud copy is set up)') + '</span>' +
+    (bk.restored ? '<b>Restored</b><span>' + esc(bk.restored.file.split(/[\\/]/).pop()) + ' - ' + ago(bk.restored.at) + ', ' + bk.restored.days + ' days, ' + esc(bk.restored.how) + '</span>' : '') +
+    '';
+  st.innerHTML = bk.lastError ? '<span class="bad-t">Last attempt failed: ' + esc(bk.lastError) + '</span>' : '';
+  const rows = bk.list || [];
+  tab.style.display = rows.length ? '' : 'none';
+  tab.querySelector('tbody').innerHTML = rows.map(r =>
+    '<tr><td>' + esc(r.name) + '</td><td>' + ago(r.at) + '</td><td class="num">' + Math.round(r.bytes / 1024) + ' KB</td>' +
+    '<td><button class="btn small" data-restore="' + esc(r.name) + '">Restore this one</button></td></tr>').join('');
+  tab.querySelectorAll('[data-restore]').forEach(b => { b.onclick = () => restoreBackup(b.getAttribute('data-restore')); });
+}
+$('bkNow').onclick = async () => {
+  $('bkNow').disabled = true;
+  try{
+    const r = await fetch('/api/backup/now', { method: 'POST' });
+    const j = await r.json();
+    if(!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    toast('Backed up: ' + j.days + ' days of history');
+  }catch(e){ toast('Backup failed: ' + e.message); }
+  $('bkNow').disabled = false; status();
+};
+$('bkPull').onclick = async () => {
+  if(!confirm('Ask the cloud copy for the newest backup and merge it into this PC?\n\nEvery day the backup holds is added; every day this PC already has is kept as it is. Nothing is lost.')) return;
+  $('bkPull').disabled = true;
+  try{
+    const r = await fetch('/api/backup/pull', { method: 'POST' });
+    const j = await r.json();
+    if(!r.ok) throw new Error(j.why || j.error || ('HTTP ' + r.status));
+    toast('Merged ' + j.days + ' days from the cloud copy' + (j.kept ? ' (' + j.kept + ' of this PC\'s own kept)' : ''));
+  }catch(e){ toast('Not pulled: ' + e.message); }
+  $('bkPull').disabled = false; status();
+};
+$('bkSave').onclick = async () => {
+  try{
+    const r = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ backup: { dir: $('bkDir').value, reportsDir: $('bkRep').value } }) });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    await fetch('/api/backup/locate', { method: 'POST' });
+    toast('Saved'); status();
+  }catch(e){ toast('Could not save: ' + e.message); }
+};
+async function restoreBackup(name){
+  if(!confirm('Put ' + name + ' over this PC\'s data?\n\nWhat is here now is replaced. Use this to move the host to this PC, or to go back to an earlier copy.')) return;
+  try{
+    const r = await fetch('/api/backup/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+    const j = await r.json();
+    if(!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    toast('Restored ' + j.days + ' days of history. Restart the service to be sure everything reads it.');
+    status();
+  }catch(e){ toast('Restore failed: ' + e.message); }
+}
+$('bfYear').onclick = () => { $('bfDays').value = 365; $('bfChunk').value = 14; };
+$('bfGo').onclick = async () => {
+  const days = +$('bfDays').value || 30, chunk = +$('bfChunk').value || 7, force = $('bfForce').checked;
+  const n = Math.ceil(days / chunk);
+  /* Every slice asks SAP for four days of creation dates before the first
+     day it files, because that is how long a task can sit between being
+     created and being picked. So a slice is always wider than the chunk,
+     and at this floor's volume the window - not the chunk - is what
+     decides whether one export finishes. */
+  const win = chunk + 4;
+  const mins = Math.max(1, Math.round(n * win * 2));
+  if(!confirm('Run ' + n + ' task exports covering ' + days + ' days?\n\n' +
+    'Each one asks SAP for ' + win + ' days of creation dates (' + chunk + ' to file, plus the 4 day lead-in).\n' +
+    'Roughly ' + (mins >= 90 ? (Math.round(mins / 6) / 10) + ' hours' : mins + ' minutes') + ' of driving SAP, and the normal pull waits until it is done.\n\n' +
+    (win > 12 ? 'That is a wide window. A slice that runs out of time is skipped and the run carries on; press it again with fewer days per export and it picks up what it missed.'
+              : 'It carries on from where it stops, so a slice that fails costs only itself.'))) return;
+  try{
+    const r = await fetch('/api/backfill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days, chunk, force, redo: force }) });
+    const j = await r.json();
+    if(!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    toast('Backfill started');
+    status();
+  }catch(e){ toast('Could not start: ' + e.message); }
+};
+
+const logEl = $('log'); let logLines = [];
+function drawLog(){ logEl.innerHTML = logLines.map(l => '<span class="' + (l.level || 'info') + '">' + new Date(l.t).toLocaleTimeString() + '  ' + esc(l.msg) + '</span>').join('\n'); logEl.scrollTop = logEl.scrollHeight; }
+function esc(s){ return String(s).replace(/[&<>]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c])); }
+async function loadLog(){ try{ const r = await fetch('/api/log?n=400', { cache:'no-store' }); logLines = (await r.json()).lines; drawLog(); }catch(e){} }
+
+async function loadConfig(){
+  const r = await fetch('/api/config', { cache:'no-store' }); const j = await r.json(); CFG = j.config; DEF = j.defaults;
+  $('cfgPath').textContent = j.file; $('logPath').textContent = j.dataDir + '\\logs';
+  const c = CFG, p = c.pull, n = p.nodes || {};
+  $('cReportDir').value = c.reportDir; $('cStage').value = c.files.stage; $('cOrders').value = c.files.orders; $('cWh').value = c.files.wh;
+  $('cEnabled').value = String(!!p.enabled); $('cDriver').value = p.driver || 'vbs'; $('cInterval').value = p.intervalSec; $('cTimeout').value = p.cycleTimeoutSec; $('cIdle').value = p.idleStopMin; $('cRecycle').value = p.recycleEvery == null ? 120 : p.recycleEvery;
+  $('cWarehouse').value = p.warehouse; $('cMonitor').value = p.monitor; $('cLookback').value = p.lookbackDays; $('cWtBack').value = (p.wtBackDays == null ? 3 : p.wtBackDays); $('cDateFormat').value = p.dateFormat;
+  $('cSettle').value = p.settleMs; $('cSwitch').value = p.switchMs; $('cBins').value = (p.binPatterns || []).join(', ');
+  const N = (k, o) => { $(k + 'Key').value = (o || {}).key || ''; $(k + 'Label').value = (o || {}).label || ''; $(k + 'Expand').value = ((o || {}).expand || []).join(','); const pe = $(k + 'Parent'); if(pe) pe.value = (o || {}).parent || ''; };
+  N('nHu', n.hu); N('nOrd', n.orders); N('nWt', n.wt);
+  $('bkDir').value = (c.backup && c.backup.dir) || ''; $('bkRep').value = (c.backup && c.backup.reportsDir) || '';
+  $('cCloudOn').value = String(!!(c.cloud && c.cloud.enabled)); $('cInsecure').value = String(!!(c.cloud && c.cloud.insecureTls)); $('cCloudUrl').value = (c.cloud && c.cloud.url) || ''; $('cCloudSecret').value = (c.cloud && c.cloud.secret) || ''; $('cViewerPw').value = (c.auth && c.auth.viewerPassword) || '';
+  $('ctlDir').value = (c.control && c.control.dir) || '';
+  const rec = p.recover || {};
+  $('rcOn').value = String(rec.enabled !== false); $('rcStale').value = rec.staleMin != null ? rec.staleMin : 10;
+  $('rcMax').value = rec.maxPerHour != null ? rec.maxPerHour : 3; $('rcUrl').value = rec.oktaUrl || ''; $('rcDir').value = rec.downloadDir || ''; $('rcBtn').value = rec.clickNames || '';
+  $('cPort').value = c.port; $('cCap').value = c.dwell.capHours; $('cWindow').value = c.dwell.windowDays; $('cGap').value = c.dwell.gapHours; $('cLegacy').value = String(!!(c.compat && c.compat.writeLegacyFiles));
+}
+/* the recovery's own state, refreshed with everything else */
+/* the "from afar" box: the buttons, and what the host said */
+const REMOTE = [['restart-sap', 'Restart SAP'], ['restart-service', 'Restart the service'], ['pull-now', 'Pull from SAP now'], ['backup-now', 'Back up now']];
+let remoteDrawn = false;
+function showRemote(st){
+  const box = $('remoteBox'); if(!box) return;
+  const cm = st && st.commands;
+  const cloud = st && st.server && st.server.mode === 'cloud';
+  const hv = st && st.server && st.server.hostView;
+  if(cloud && !hv){ box.style.display = 'none'; return; }
+  box.style.display = '';
+  if(!remoteDrawn){
+    $('remoteBtns').innerHTML = REMOTE.map(([n, l]) => '<button class="btn" data-cmd="' + n + '">' + l + '</button>').join('');
+    document.querySelectorAll('#remoteBtns button').forEach(b => b.onclick = async () => {
+      if(b.dataset.cmd === 'restart-service' && !confirm('Restart the service on the host PC? The board goes away for about half a minute.')) return;
+      b.disabled = true;
+      try{
+        const r = await fetch('/api/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: b.dataset.cmd }) });
+        const j = await r.json();
+        toast(j.ok ? (j.queued ? 'Queued for the host' : 'Done' + (j.result && j.result.why ? ': ' + j.result.why : '')) : ('Not done: ' + (j.error || (j.result && j.result.why) || r.status)));
+        status();
+      }catch(e){ toast('Could not reach the service'); }
+      b.disabled = false;
+    });
+    remoteDrawn = true;
+  }
+  const el = $('remoteState');
+  if(!cm){ el.textContent = ''; return; }
+  const bits = [];
+  if(cm.pending && cm.pending.length) bits.push('<b>waiting for the host:</b> ' + cm.pending.map(c => esc(c.name)).join(', '));
+  const done = (cm.done || []).slice(-3).reverse();
+  done.forEach(d => bits.push(esc(d.name) + ' ' + ago(d.at) + ': ' + (d.ok ? '<span class="ok-t">done</span>' : '<span class="bad-t">refused</span>') + (d.why ? ' - ' + esc(d.why) : '')));
+  if(cm.folder) bits.push('watching <code>' + esc(cm.folder) + '</code> for command files');
+  el.innerHTML = bits.join('<br>') || 'nothing asked for yet';
+}
+function showRecovery(st){   // called from render()
+  const el = $('rcState'); if(!el) return;
+  const r = st && st.recovery;
+  if(!r){ el.textContent = 'Not available on this copy.'; return; }
+  const bits = [];
+  /* on the copy this is what the host said on its last push, so say whose
+     answer it is rather than implying the copy could restart anything */
+  const srv = (st.server || {});
+  if(srv.mode === 'cloud') bits.push('on ' + esc((srv.cloud && srv.cloud.host) || 'the host') + ':');
+  if(!r.enabled) bits.push('<span class="warn-t">turned off</span>');
+  else if(!r.ready) bits.push('<span class="warn-t">no Okta link set, so SAP will be left alone</span>');
+  else bits.push('<span class="ok-t">armed</span>, after ' + r.staleMin + ' quiet minutes');
+  if(r.running) bits.push('<b>restarting SAP now: ' + esc(r.why || '') + '</b>');
+  if(r.last) bits.push('last tried ' + ago(r.last.at) + ' (' + esc(r.last.why) + '): ' + (r.last.ok ? 'SAP came back' : '<span class="bad-t">' + esc(r.lastError || 'did not come back') + '</span>') + ', took ' + Math.round(r.last.took / 1000) + 's');
+  else if(r.attempts) bits.push(r.attempts + ' attempts this run');
+  el.innerHTML = bits.join(' &middot; ');
+}
+$('rcNow').onclick = async () => {
+  $('rcMsg').textContent = 'Asking...';
+  try{
+    const r = await fetch('/api/sap/recover', { method: 'POST' });
+    const j = await r.json();
+    $('rcMsg').textContent = j.ok ? 'Restarting SAP; watch the pull log.' : ('Not started: ' + (j.why || j.error || 'refused'));
+    status();
+  }catch(e){ $('rcMsg').textContent = 'Not started: ' + e.message; }
+};
+$('bSave').onclick = async () => {
+  const node = k => ({ key: $(k + 'Key').value.trim(), label: $(k + 'Label').value.trim(), parent: ($(k + 'Parent') ? $(k + 'Parent').value.trim() : ''), expand: $(k + 'Expand').value.split(',').map(s => s.trim()).filter(Boolean) });
+  const patch = {
+    reportDir: $('cReportDir').value, files: { stage: $('cStage').value, orders: $('cOrders').value, wh: $('cWh').value },
+    pull: { enabled: $('cEnabled').value === 'true', driver: $('cDriver').value, intervalSec: +$('cInterval').value, cycleTimeoutSec: +$('cTimeout').value, idleStopMin: +$('cIdle').value, recycleEvery: +$('cRecycle').value,
+            warehouse: $('cWarehouse').value, monitor: $('cMonitor').value, lookbackDays: +$('cLookback').value, wtBackDays: +$('cWtBack').value, dateFormat: $('cDateFormat').value,
+            settleMs: +$('cSettle').value, switchMs: +$('cSwitch').value, binPatterns: $('cBins').value.split(',').map(s => s.trim()).filter(Boolean),
+            nodes: { hu: node('nHu'), orders: node('nOrd'), wt: node('nWt') },
+            recover: { enabled: $('rcOn').value === 'true', staleMin: +$('rcStale').value || 10, maxPerHour: +$('rcMax').value || 0,
+                       oktaUrl: $('rcUrl').value.trim(), downloadDir: $('rcDir').value.trim(), clickNames: $('rcBtn').value.trim() } },
+    cloud: { enabled: $('cCloudOn').value === 'true', url: $('cCloudUrl').value, secret: $('cCloudSecret').value, insecureTls: $('cInsecure').value === 'true' }, auth: { viewerPassword: $('cViewerPw').value },
+    control: { dir: $('ctlDir').value.trim() },
+    port: +$('cPort').value, dwell: { capHours: +$('cCap').value, windowDays: +$('cWindow').value, gapHours: +$('cGap').value }, compat: { writeLegacyFiles: $('cLegacy').value === 'true' }
+  };
+  try{
+    const r = await fetch('/api/config', { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(patch) });
+    const j = await r.json(); if(!r.ok) throw new Error(j.error || 'save failed');
+    $('saveMsg').textContent = 'Saved' + (j.restartNeeded ? '. Restart the service for the new port.' : '.'); toast('Configuration saved'); loadConfig(); status();
+  }catch(e){ $('saveMsg').textContent = 'Not saved: ' + e.message; }
+};
+$('bFindWt').onclick = async () => {
+  $('findWtMsg').textContent = 'Reading the tree and choosing, this takes a few seconds';
+  $('bFindWt').disabled = true;
+  try{
+    const r = await fetch('/api/pull/findwt', { method: 'POST' });
+    const j = await r.json();
+    if(!r.ok) throw new Error(j.error || 'failed');
+    const c = j.chosen;
+    $('findWtMsg').textContent = 'Saved. The next cycle uses it.';
+    $('findWtOut').innerHTML = '<b>Using:</b> ' + esc(c.path) + ' <span class="k">' + esc(c.key) + '</span>' +
+      (j.candidates && j.candidates.length > 1
+        ? '<br><b>Also considered:</b><br>' + j.candidates.slice(1).map(x =>
+            '&nbsp;&nbsp;' + esc(x.path) + ' <span class="k">' + esc(x.key) + '</span>').join('<br>')
+        : '');
+    toast('Task node set');
+    loadConfig(); status();
+  }catch(e){ $('findWtMsg').textContent = 'Could not pick it: ' + e.message; }
+  $('bFindWt').disabled = false;
+};
+$('bTree').onclick = async () => {
+  $('treeMsg').textContent = 'Reading the tree from SAP, this takes a few seconds'; $('bTree').disabled = true;
+  try{ const r = await fetch('/api/tree', { method:'POST' }); const j = await r.json(); if(!r.ok) throw new Error(j.error || 'failed'); drawTree(j); $('treeMsg').textContent = j.nodes.length + ' nodes read ' + fmt(j.at); }
+  catch(e){ $('treeMsg').textContent = 'Could not read the tree: ' + e.message; }
+  $('bTree').disabled = false;
+};
+let TREE = {};
+function drawTree(t){
+  const byParent = {}; TREE = {};
+  (t.nodes || []).forEach(n => { (byParent[n.parent || ''] = byParent[n.parent || ''] || []).push(n); TREE[n.key] = n; });
+  const out = [];
+  const walk = (parent, depth) => { (byParent[parent] || []).forEach(n => {
+    /* Anything that looks like a task list gets a button, because
+       choosing one of these by hand means getting four fields right -
+       key, label, parent and the nodes to expand on the way down - and
+       the tree already knows all four. */
+    /* Only nodes that are task lists. Offering this on 'Outbound Delivery
+       Order Item' - which it did - invites somebody to point the task
+       export at a delivery report, and then no task export runs at all. */
+    const useful = /task/i.test(n.text || '');
+    out.push('<div data-key="' + n.key + '" style="padding-left:' + (depth * 16 + 4) + 'px">' + esc(n.text || '(no text)') +
+      ' <span class="k">' + n.key + '</span>' +
+      (useful ? ' <button class="btn useNode" data-use="' + n.key + '" title="Point the warehouse task export at this node">use for tasks</button>' : '') +
+      '</div>');
+    if(depth < 12) walk(n.key, depth + 1); }); };
+  walk('', 0);
+  if(!out.length) (t.nodes || []).forEach(n => out.push('<div data-key="' + n.key + '">' + esc(n.text || '') + ' <span class="k">' + n.key + '</span></div>'));
+  $('tree').innerHTML = out.join('') || 'no nodes';
+  $('tree').querySelectorAll('div[data-key]').forEach(d => { d.onclick = e => {
+    if(e.target.closest('[data-use]')) return;
+    navigator.clipboard.writeText(d.dataset.key).then(() => toast('Copied ' + d.dataset.key));
+  }; });
+  $('tree').querySelectorAll('[data-use]').forEach(b => { b.onclick = e => { e.stopPropagation(); useForTasks(b.dataset.use); }; });
+}
+/* Fill in the four task-node fields from the tree and save them. The
+   expand list is every ancestor above the node, oldest first, which is
+   what the driver opens on its way down. */
+function useForTasks(key){
+  const n = TREE[key];
+  if(!n) return;
+  const chain = [];
+  let p = n.parent;
+  while(p && TREE[p] && chain.length < 12){ chain.unshift(p); p = TREE[p].parent; }
+  $('nWtKey').value = n.key;
+  $('nWtLabel').value = n.text || '';
+  $('nWtParent').value = n.parent && TREE[n.parent] ? (TREE[n.parent].text || '') : '';
+  $('nWtExpand').value = chain.join(',');
+  document.querySelector('.tabs button[data-pane="config"]').click();
+  $('nWtKey').scrollIntoView({ block: 'center' });
+  toast('Task node set to ' + (n.text || n.key) + ' - press Save to keep it');
+}
+/* What the export carries. Reads what the service already holds, so this
+   costs nothing and needs no SAP. */
+document.querySelectorAll('.tabs button').forEach(b => { b.onclick = () => { document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b)); document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === 'pane-' + b.dataset.pane)); if(b.dataset.pane === 'log') loadLog(); if(b.dataset.pane === 'tree') fetch('/api/tree').then(r => r.json()).then(drawTree).catch(() => {}); }; });
+status(); loadLog(); loadConfig();
+setInterval(status, 10000);
+try{
+  const es = new EventSource('/api/events');
+  es.addEventListener('status', ev => { try{ render(JSON.parse(ev.data)); }catch(e){} });
+  es.addEventListener('log', ev => { try{ logLines.push(JSON.parse(ev.data)); if(logLines.length > 400) logLines.shift(); drawLog(); }catch(e){} });
+  es.addEventListener('data', status);
+}catch(e){}
+</script>
+<script src="/web/theme.js"></script>
+<script src="/web/board2.js"></script>
+<script>(function(){ const ids = window.SLH.wrapSections('main.wrap'); window.SLH.initModules('admin', [ids]); })();
+/* History collected on another PC. The settings it was read under travel
+   with it, and a mismatch is refused once with what differs named, because
+   a history parsed under another area map is wrong in a way nobody notices
+   for weeks. */
+(function(){
+  const f = document.getElementById('impFile'), go = document.getElementById('impGo'), out = document.getElementById('impState');
+  if(!go) return;
+  const send = async anyway => {
+    if(!f.files || !f.files[0]){ out.textContent = 'Choose the file the other PC wrote first.'; return; }
+    go.disabled = true;
+    out.textContent = 'Reading ' + f.files[0].name + '\u2026';
+    try{
+      const body = await f.files[0].arrayBuffer();
+      const r = await fetch('/api/history/import' + (anyway ? '?anyway=1' : ''), { method: 'POST', body: body });
+      const j = await r.json();
+      if(r.status === 409 && j.differences){
+        out.innerHTML = '<b>That history was read under different settings.</b><br>' +
+          j.differences.map(d => '&nbsp;&nbsp;' + d.what + ': here <b>' + (d.here || '(blank)') +
+            '</b>, there <b>' + (d.there || '(blank)') + '</b>').join('<br>') +
+          '<br>' + j.note + '<br><button class="btn" id="impAnyway">Take it anyway</button>';
+        const btn = document.getElementById('impAnyway');
+        if(btn) btn.onclick = () => send(true);
+        go.disabled = false;
+        return;
+      }
+      if(!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      out.innerHTML = '<b>' + j.added + '</b> day(s) new, <b>' + j.improved + '</b> improved, <b>' +
+        j.kept + '</b> already better here' + (j.skipped ? ', ' + j.skipped + ' skipped' : '') +
+        '.<br>' + (j.from ? j.from + ' to ' + j.to : '') +
+        (j.collectedBy ? ', collected on ' + j.collectedBy : '') + '.';
+      toast('History taken in');
+    }catch(e){ out.textContent = 'Not taken: ' + e.message; }
+    go.disabled = false;
+  };
+  go.onclick = () => send(false);
+})();
+
+/* The floor TV's goal. It lives in the board settings, which every screen
+   reads, so saving it here changes every TV at once. */
+(function(){
+  const g = document.getElementById('tvGoal'), b = document.getElementById('tvSave'), m = document.getElementById('tvMsg');
+  if(!b) return;
+  let current = null;
+  const load = async () => {
+    try{
+      const r = await fetch('/api/settings', { cache: 'no-store' });
+      current = await r.json();
+      if(current && typeof current === 'object') g.value = current.goalLines != null ? current.goalLines : 2500;
+    }catch(e){ m.textContent = 'Could not read the board settings: ' + e.message; }
+  };
+  b.onclick = async () => {
+    const v = Math.max(1, parseInt(g.value, 10) || 2500);
+    b.disabled = true;
+    try{
+      /* the whole object goes back, because that is what the board writes:
+         sending only the one field would wipe every other board setting */
+      if(!current || typeof current !== 'object') throw new Error('the board settings have not loaded yet');
+      current.goalLines = v;
+      const r = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                                               body: JSON.stringify(current) });
+      if(!r.ok) throw new Error('HTTP ' + r.status);
+      m.textContent = 'Saved. Every board picks it up on its next refresh.';
+      toast('Floor TV goal saved');
+    }catch(e){ m.textContent = 'Not saved: ' + e.message; }
+    b.disabled = false;
+  };
+  load();
+})();
+
+/* ---- picking and review settings ----------------------------------------
+   These used to live at the bottom of the picker page, behind a collapsed
+   Admin box, which is a strange place for the numbers every other page is
+   measured against. They are here now with everything else that is a
+   setting. One save each, because the two are read by different people on
+   different days and a single Save would make one of them nervous about
+   touching the other. */
+let PICK_COLS = [];
+
+/* The real column names out of the task export, so nobody has to guess what
+   this system calls a delivery line. */
+function renderCols(){
+  const chips = document.getElementById('colChips'), hint = document.getElementById('colHint');
+  if(!chips) return;
+  if(!PICK_COLS.length){
+    hint.textContent = 'Column names appear here once a task export has been read.';
+    chips.innerHTML = ''; return;
+  }
+  hint.textContent = 'Click the column(s) in your export that identify a delivery line, usually a document and an item number.';
+  const chosen = document.getElementById('tgtLine').value.split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+  chips.innerHTML = PICK_COLS.map(c => '<button type="button" data-col="' + esc(c) + '"' +
+    (chosen.indexOf(c.toLowerCase()) >= 0 ? ' class="on"' : '') + '>' + esc(c) + '</button>').join('');
+  chips.querySelectorAll('button').forEach(b => b.onclick = () => {
+    const f = document.getElementById('tgtLine');
+    const cur = f.value.split(',').map(x => x.trim()).filter(Boolean);
+    const at = cur.findIndex(x => x.toLowerCase() === b.dataset.col.toLowerCase());
+    if(at >= 0) cur.splice(at, 1); else cur.push(b.dataset.col);
+    f.value = cur.join(', ');
+    renderCols();
+  });
+}
+
+async function loadPicking(){
+  const v = (id, val) => { const e = document.getElementById(id); if(e) e.value = val; };
+  try{
+    const j = await (await fetch('/api/config', { cache: 'no-store' })).json();
+    const p = (j.config && j.config.pickers) || {};
+    v('tgtText', p.targets || '');
+    v('tgtWindow', p.activeMin || 30);
+    v('tgtHide', p.hide || '');
+    v('tgtMin', p.minPicks || 0);
+    v('tgtLine', p.lineKey || '');
+    v('tgtShift', p.shiftHours || 8);
+    v('tgtDay', p.dayHours || 6.5);
+    v('tgtProd', p.prodFloor != null ? p.prodFloor : 75);
+    const bd = p.bands || {};
+    v('tgtBandGood', bd.good != null ? bd.good : 95);
+    v('tgtBandWarn', bd.warn != null ? bd.warn : 85);
+    v('tgtSchedule', p.schedule || '');
+    const rv = p.review || {};
+    v('rvWindows', (rv.windows || [5, 10, 15, 20]).join(', '));
+    v('rvMinHours', rv.minHours != null ? rv.minHours : 2);
+    v('rvPeerShare', rv.peerMinShare != null ? rv.peerMinShare : 34);
+    v('rvCapProd', (rv.capProd === false) ? '0' : '1');
+    v('rvActs', rv.actLabels != null ? rv.actLabels : '');
+    /* blank fields are the built-in values, so say what they are rather
+       than leaving somebody to guess what blank means */
+    const rep = await (await fetch('/api/pickers?days=1', { cache: 'no-store' })).json().catch(() => null);
+    if(rep){
+      PICK_COLS = rep.columns || [];
+      if(!p.targets && rep.targets) v('tgtText', rep.targets);
+      if(!p.schedule && rep.scheduleText) v('tgtSchedule', rep.scheduleText);
+    }
+    renderCols();
+  }catch(e){
+    const m = document.getElementById('tgtMsg');
+    if(m) m.textContent = 'Could not read the settings: ' + e.message;
+  }
+}
+
+async function savePickers(body, msgId, what){
+  const m = document.getElementById(msgId);
+  try{
+    const r = await fetch('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                                           body: JSON.stringify({ pickers: body }) });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    m.textContent = 'Saved. Every page reads these the next time it loads.';
+    toast(what + ' saved');
+    loadPicking();
+  }catch(e){ m.textContent = 'Not saved: ' + e.message; }
+}
+
+document.addEventListener('click', e => {
+  const id = e.target && e.target.id;
+  const val = x => document.getElementById(x).value;
+  if(id === 'tgtSave'){
+    savePickers({
+      targets: val('tgtText'), activeMin: +val('tgtWindow') || 30, hide: val('tgtHide'),
+      minPicks: +val('tgtMin') || 0, lineKey: val('tgtLine'),
+      shiftHours: +val('tgtShift') || 8, dayHours: +val('tgtDay') || 6.5,
+      prodFloor: Math.max(0, Math.min(100, +val('tgtProd') || 0)),
+      schedule: val('tgtSchedule'),
+      bands: { good: +val('tgtBandGood') || 95, warn: +val('tgtBandWarn') || 0 }
+    }, 'tgtMsg', 'Picking settings');
+  }
+  if(id === 'rvSave'){
+    savePickers({
+      review: { windows: val('rvWindows'), minHours: +val('rvMinHours'),
+                peerMinShare: +val('rvPeerShare'), capProd: val('rvCapProd') === '1',
+                actLabels: val('rvActs') }
+    }, 'rvMsg', 'Review settings');
+  }
+});
+loadPicking();
+</script>
+</body>
+</html>

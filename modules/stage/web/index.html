@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Staging Lane Health</title>
+<link rel="stylesheet" href="/web/board2.css">
+</head>
+<body>
+<div class="bar" data-page="home" data-sub="Home" data-tools="reset"></div>
+<main class="wrap">
+  <div class="attention" id="attention" hidden></div>
+  <section class="status-card" id="statusCard" data-mod="status">
+    <div class="pill"><span class="dot" id="dot"></span><span id="stText">Connecting to the service</span></div>
+    <div class="sub" id="stSub"></div>
+    <div class="steps" id="steps"></div>
+  </section>
+
+  <section class="grid" id="homeGrid">
+    <a class="tile big" href="/tv" data-mod="tv"><div class="t">Floor TV</div><div class="d">The wall board. Every lane, what to clear next, what's stuck.</div></a>
+    <a class="tile" href="/ops" data-mod="ops"><div class="t">Ops view</div><div class="d">For leads. Pace against goal, cleared per hour, stuck orders, settings.</div></a>
+    <div class="tile zones" id="zoneTiles" data-mod="zones"><div class="t">Area TVs</div><div class="d">One area, big. For a TV stationed along the line.</div><div class="zone-links" id="zoneLinks">loading</div></div>
+    <a class="tile" href="/classic" data-mod="classic"><div class="t">Classic board</div><div class="d">The old board, kept as it was.</div></a>
+    <a class="tile" href="/quad" data-mod="quad" data-host-only><div class="t">Wall panel</div><div class="d">Four views on one 1080p screen. For the big touch panel on the floor.</div></a>
+    <a class="tile" href="/help" data-mod="help"><div class="t">Help</div><div class="d">What breaks and what to do about it, and what every number on here means.</div></a>
+  </section>
+
+  <!-- the numbers and the settings are in the bar; what is left here is what
+       a screen on the wall opens, and the address to give the next one -->
+  <section class="howto" data-mod="howto" id="howto" data-host-only>
+    <h2 class="ch">Open on any screen</h2>
+    <div class="addr" id="addr"></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+function fmtAgo(ms){ if(!ms) return 'never'; const s = Math.round((Date.now() - ms) / 1000); if(s < 60) return s + 's ago'; if(s < 3600) return Math.round(s / 60) + ' min ago'; return Math.round(s / 360) / 10 + ' h ago'; }
+function render(st){
+  const pu = st.puller || {};
+  const newest = st.newestFile;
+  const staleMs = 30 * 60000;
+  const fresh = newest && (Date.now() - newest) < staleMs;
+  let dot = 'ok', text = 'Everything is running', sub = '';
+  const steps = [];
+  const sapOk = pu.sap && pu.sap.ok;
+  if(st.server && st.server.mode === 'cloud'){
+    /* the cloud copy: what matters is whether it is current, nothing else */
+    const cl = st.server.cloud || {};
+    const got = cl.receivedAt;
+    const ok = got && (Date.now() - got) < staleMs;
+    $('dot').className = 'dot ' + (ok ? 'ok' : 'warn');
+    $('stText').textContent = ok ? 'Live' : 'Not updating';
+    $('stSub').textContent = got ? ('Updated ' + fmtAgo(got)) : 'Waiting for the first update';
+    $('steps').innerHTML = '';
+    return;
+  }
+  if(!pu.enabled){ dot = fresh ? 'ok' : 'warn'; text = fresh ? 'Reading the report folder' : 'Folder only, no new data'; steps.push(['ok', 'Service running on ' + st.server.host]); steps.push([fresh ? 'ok' : 'warn', 'Exports in ' + st.server.reportDir + ' (' + fmtAgo(newest) + ')']); }
+  else {
+    steps.push(['ok', 'Service running on ' + st.server.host]);
+    steps.push([sapOk ? 'ok' : 'bad', sapOk ? 'SAP is open' : 'SAP is not open on this PC. Log in and this picks up again']);
+    const pulling = !pu.stopped && !pu.idle;
+    steps.push([pulling ? 'ok' : 'warn', pu.stopped ? 'Pull stopped. Press START in Admin' : pu.idle ? 'Paused, nobody is watching' : (pu.running ? 'Pulling now: ' + (pu.phase || '') : 'Pulling every ' + pu.intervalSec + 's')]);
+    steps.push([fresh ? 'ok' : 'warn', 'Newest export ' + fmtAgo(newest)]);
+    if(!sapOk){ dot = 'bad'; text = 'Open EWM on the host PC'; }
+    else if(pu.stopped){ dot = 'warn'; text = 'Pull stopped'; }
+    else if(pu.idle){ dot = 'warn'; text = 'Paused, nobody watching'; }
+    else if(!fresh){ dot = pu.lastOk === false ? 'bad' : 'warn'; text = pu.lastOk === false ? 'Pull failing: ' + (pu.lastError || 'see Admin log') : 'Running, no new data yet'; }
+  }
+  const f = st.files || {};
+  sub = ['stage', 'orders', 'wh'].map(k => { const x = f[k] || {}; return (x.name || k) + ': ' + (x.status || '-') + (x.rows != null ? ' (' + x.rows + ' rows)' : ''); }).join('  |  ');
+  $('dot').className = 'dot ' + dot; $('stText').textContent = text; $('stSub').textContent = sub;
+  $('steps').innerHTML = steps.map(s => '<div class="step ' + s[0] + '"><span class="sd"></span>' + s[1] + '</div>').join('');
+  $('addr').innerHTML = (st.server.addresses || []).map(a => '<code>' + a + '</code>').join(' or ') + '  (' + st.server.viewers + ' connected now)';
+}
+async function load(){
+  try{ const r = await fetch('/api/status', { cache:'no-store' }); render(await r.json()); }
+  catch(e){ $('dot').className = 'dot bad'; $('stText').textContent = 'Service not reachable'; }
+}
+async function zones(){
+  try{
+    const r = await fetch('/api/settings', { cache:'no-store' });
+    const s = r.ok ? await r.json() : null;
+    const lanes = (s && s.lanes) || { row1: [], row2: [], bottom: [] };
+    const all = [].concat(lanes.row1 || [], lanes.row2 || [], lanes.bottom || []);
+    let prefixes = [];
+    all.forEach(b => { const m = /^([A-Z]\d{2})/i.exec(b); const p = m ? m[1].toUpperCase() : ''; if(p && prefixes.indexOf(p) < 0) prefixes.push(p); });
+    if(!prefixes.length) prefixes = ['E00', 'E01', 'E02', 'E03', 'E04', 'E05'];   // the board's own defaults
+    const links = [];
+    for(let i = 0; i < prefixes.length; i += 2){ const a = prefixes[i], b = prefixes[i + 1]; links.push({ id: ('z_' + a + (b ? '_' + b : '')).toLowerCase(), label: a + (b ? ' / ' + b : '') }); }
+    $('zoneLinks').innerHTML = prefixes.map(p => '<a href="/tv?area=' + p + '">' + p + '</a>').join('') + links.map(l => '<a href="/tv?zone=' + l.id + '" style="background:#444;color:#fff">' + l.label + '</a>').join('');
+  }catch(e){ $('zoneLinks').innerHTML = ['E00', 'E01', 'E02', 'E03', 'E04', 'E05', 'E06'].map(p => '<a href="/tv?area=' + p + '">' + p + '</a>').join(''); }
+}
+load(); zones();
+/* what needs a person, from the board itself */
+async function loadAttention(){
+  try{
+    const r = await fetch('/api/board', { cache: 'no-store' });
+    if(!r.ok) return;
+    const m = await r.json();
+    /* board2.js is loaded at the foot of the page, so on a cold cache this
+       answer can arrive before the code that draws it. Wait for it rather
+       than leaving the strip blank until the next half-minute tick. */
+    if(!window.SLH){ setTimeout(loadAttention, 250); return; }
+    window.SLH.drawAttention('attention', m);
+  }catch(e){}
+}
+loadAttention();
+setInterval(loadAttention, 30000);
+setInterval(load, 15000);
+try{ const es = new EventSource('/api/events'); es.addEventListener('status', ev => { try{ render(JSON.parse(ev.data)); }catch(e){} }); es.addEventListener('data', () => { load(); loadAttention(); }); }catch(e){}
+</script>
+<div id="quadGate" hidden>
+  <form method="POST" action="/quad/unlock">
+    <h2>Host view</h2>
+    <p id="quadMsg">Enter the code.</p>
+    <input type="password" name="code" inputmode="numeric" autocomplete="off" aria-label="Code">
+    <input type="hidden" name="next" value="/">
+    <p class="note">Shows this copy the way the host PC shows itself - the wall panel, the pull, the
+      backfill, the standards. It stays a viewer: nothing here can be changed.</p>
+    <div class="qg-btns">
+      <button type="button" id="quadCancel">Cancel</button>
+      <button type="submit" class="go">Show it</button>
+    </div>
+  </form>
+</div>
+<style>
+  /* The wall panel is not listed anywhere on the copy. Five taps on the logo
+     and a code open it - enough to keep a floor screen out of casual reach,
+     which is all it is for. */
+  #quadGate{ position:fixed; inset:0; z-index:200; background:rgba(0,0,0,.72);
+             display:flex; align-items:center; justify-content:center; }
+  #quadGate[hidden]{ display:none; }
+  #quadGate form{ background:#111; border:1px solid #333; border-radius:12px; padding:22px 24px;
+                  width:min(90vw,320px); text-align:center; color:#fff; }
+  #quadGate h2{ margin:0 0 4px; font-size:18px; letter-spacing:.06em; text-transform:uppercase; }
+  #quadGate p{ margin:0 0 16px; color:#c3c2b7; font-size:13px; }
+  #quadGate p.bad{ color:#ff6b6b; font-weight:700; }
+  #quadGate p.note{ font-size:12px; line-height:1.45; margin:14px 0 0; color:#8c8a84; }
+  #quadGate input{ font:inherit; font-size:24px; letter-spacing:.4em; text-align:center; width:100%;
+                   box-sizing:border-box; padding:12px; border-radius:8px; border:1px solid #3a3a3a;
+                   background:#1b1b1b; color:#fff; }
+  .qg-btns{ display:flex; gap:8px; margin-top:14px; }
+  .qg-btns button{ font:inherit; font-weight:700; flex:1; padding:11px; border-radius:8px;
+                   border:1px solid #3a3a3a; background:#1b1b1b; color:#fff; cursor:pointer; }
+  .qg-btns button.go{ background:#FFC000; border-color:#FFC000; color:#000; }
+  .bar .logo-link{ -webkit-tap-highlight-color:transparent; }
+</style>
+<script src="/web/theme.js"></script>
+<script src="/web/board2.js"></script>
+<script>document.querySelector('main.wrap').id = 'homeMain'; window.SLH.initModules('home', [['homeGrid'], ['homeMain']]);</script>
+<script>
+/* Five taps on the Hubbell logo, then the code, turns on host view: the copy
+   stops hiding the parts meant for the PC next to SAP. The logo is a link
+   home, so the taps have to be counted without following it - and a stray
+   double click on the way home must not start counting, which is what the
+   three second window is for. */
+(function(){
+  const gate = document.getElementById('quadGate');
+  const logo = document.querySelector('.bar .logo-link');
+  if(!gate || !logo) return;
+  const msg = document.getElementById('quadMsg');
+  const box = gate.querySelector('input[name=code]');
+  const back = gate.querySelector('input[name=next]');
+  if(back) back.value = location.pathname + location.search;
+  let taps = 0, timer = null;
+
+  function open(wrong){
+    gate.hidden = false;
+    msg.textContent = wrong ? 'That code was not right.' : 'Enter the code.';
+    msg.className = wrong ? 'bad' : '';
+    box.value = '';
+    setTimeout(() => { try{ box.focus(); }catch(e){} }, 30);
+  }
+  function close(){ gate.hidden = true; taps = 0; }
+
+  logo.addEventListener('click', e => {
+    taps++;
+    if(timer) clearTimeout(timer);
+    /* the first four taps swallow the trip home; the fifth opens the box */
+    if(taps < 5){
+      e.preventDefault();
+      timer = setTimeout(() => { taps = 0; }, 3000);
+      return;
+    }
+    e.preventDefault();
+    taps = 0;
+    open(false);
+  });
+
+  document.getElementById('quadCancel').onclick = close;
+  gate.addEventListener('click', e => { if(e.target === gate) close(); });
+  document.addEventListener('keydown', e => { if(e.key === 'Escape' && !gate.hidden) close(); });
+
+  // the server sends us back here when the code was wrong
+  if(new URLSearchParams(location.search).get('quad') === 'bad'){
+    history.replaceState(null, '', location.pathname);
+    open(true);
+  }
+})();
+</script>
+</body>
+</html>

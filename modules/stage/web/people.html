@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Staging Lane Health - People</title>
+<link rel="stylesheet" href="/web/board2.css">
+<style>
+  /* Everyone who picks, over a week, a month or a year: how much, how fast,
+     how that compares with the standard, and how much of their shift was
+     spent picking. One row each. Click a user ID to look at one person on
+     their own; click it again for everyone. */
+  .wrap{ max-width:1400px; margin:0 auto; padding:16px 22px 40px; }
+  .controls{ display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px; }
+  .seg{ display:inline-flex; border:1px solid var(--axis); border-radius:6px; overflow:hidden; }
+  .seg button{ font:inherit; font-size:13px; font-weight:700; border:none; background:var(--tile); color:var(--ink-2); padding:6px 14px; cursor:pointer; }
+  .seg button + button{ border-left:1px solid var(--axis); }
+  .seg button.on{ background:var(--amber); color:#000; }
+  .ctl{ display:flex; flex-direction:column; gap:4px; }
+  .ctl-h{ font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-2); }
+  select.dd, input.dd{ font:inherit; font-size:13px; font-weight:700; border:1px solid var(--axis); border-radius:6px; background:var(--tile); color:var(--ink); padding:6px 8px; }
+  input.dd{ font-weight:600; min-width:200px; }
+  .hint{ font-size:12px; color:var(--muted); }
+  .tiles.kpis{ grid-template-columns:repeat(5, 1fr); margin-top:4px; }
+  .kpis .tile .val{ font-size:34px; }
+  .card{ margin-top:14px; }
+  table.people{ width:100%; border-collapse:collapse; font-size:14px; }
+  table.people th{ text-align:left; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-2); padding:8px 8px; border-bottom:2px solid var(--axis); cursor:pointer; white-space:nowrap; user-select:none; }
+  table.people th.n, table.people td.n{ text-align:right; font-variant-numeric:tabular-nums; }
+  table.people th.on{ color:var(--amber); }
+  table.people th.on::after{ content:' \25BE'; } table.people th.on.asc::after{ content:' \25B4'; }
+  table.people td{ padding:7px 8px; border-bottom:1px solid var(--axis); vertical-align:middle; }
+  table.people tr:hover td{ background:var(--blue-soft); }
+  table.people .who{ font-weight:800; cursor:pointer; color:var(--ink); background:none; border:none; font:inherit; padding:2px 6px; border-radius:4px; }
+  table.people .who:hover{ background:var(--amber); color:#000; }
+  table.people .who.on{ background:var(--amber); color:#000; }
+  .pct{ font-weight:800; } .pct.good{ color:var(--good); } .pct.warn{ color:#8a5a00; } .pct.bad{ color:var(--crit); }
+  body.dark .pct.warn{ color:var(--warn); }
+  .bar2{ display:inline-block; width:90px; height:10px; background:var(--blue-soft); border-radius:3px; overflow:hidden; vertical-align:middle; margin-right:6px; }
+  .bar2 i{ display:block; height:100%; background:var(--blue); }
+  .bar2 i.good{ background:var(--good); } .bar2 i.warn{ background:var(--amber); } .bar2 i.bad{ background:var(--crit); }
+  svg.spark{ width:110px; height:26px; vertical-align:middle; }
+  .muted{ color:var(--muted); }
+  .empty{ padding:24px; text-align:center; color:var(--ink-2); }
+  .tablewrap{ overflow-x:auto; }
+
+  /* ---- one person ----------------------------------------------------
+     The same numbers the table carries, drawn. One hue for the person's
+     own marks (the board's blue), a lighter step of it where a figure is
+     estimated or is the track a fill sits in, the status colours only on
+     the words that say good or bad. Everything here also exists as a table
+     behind the "Table" button, so nothing is read by colour alone. */
+  .detail{ --viz:var(--blue); --viz-soft:#86b6ef; }
+  body.dark .detail{ --viz-soft:#184f95; }
+  .detail h2 .btn{ margin-left:auto; }
+  .detail .head{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
+  /* the name and its line of figures give way first, so the controls
+     beside them stay on one row rather than wrapping and leaving a button
+     stranded on the left of a second one */
+  .detail .head h2{ margin:0; flex:1 1 240px; min-width:0; }
+  .detail .head .seg button{ padding:4px 10px; font-size:12px; }
+  .detail .head .btn.review{ margin-left:auto; }
+  .ptiles{ display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin:8px 0 14px; }
+  .ptile .val{ font-size:40px; }
+  .ptile .val.good{ color:var(--good); } .ptile .val.warn{ color:#8a5a00; } .ptile .val.bad{ color:var(--crit); }
+  body.dark .ptile .val.warn{ color:var(--warn); }
+  .ptile .sub{ margin-top:2px; }
+  .pgrid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .pchart{ background:var(--tile); border:1px solid var(--ring); border-radius:8px; padding:12px 14px 10px; min-width:0; }
+  .pchart.wide{ grid-column:1 / -1; }
+  .pchart h3{ font-size:12px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:0 0 2px; display:flex; align-items:baseline; gap:10px; }
+  .pchart h3 span{ font-weight:600; letter-spacing:0; text-transform:none; color:var(--ink-2); font-size:12px; }
+  .pchart svg{ width:100%; height:auto; display:block; overflow:visible; }
+  .pchart .grid line{ stroke:var(--hair); stroke-width:1; }
+  .pchart .ax text{ fill:var(--muted); font-size:11px; font-variant-numeric:tabular-nums; }
+  /* the status palette, the same one the board reads by: at or over the
+     standard, within fifteen of it, or under. Never colour alone - every
+     column has its value on hover, the tall ones are labelled outright, and
+     the table view carries the lot. */
+  .pchart .col{ fill:var(--gray); }
+  .pchart .col.good{ fill:var(--good); }
+  .pchart .col.warn{ fill:var(--warn); }
+  .pchart .col.bad{ fill:var(--crit); }
+  .pchart .col.est{ opacity:.45; }
+  .pchart .col.track{ fill:var(--viz-soft); }
+  .pchart .col.picking{ fill:var(--good); }
+  .pchart .col.down{ fill:var(--crit); }
+  .pchart .col.allow{ fill:var(--warn); }
+  .pchart .hit{ fill:transparent; cursor:default; outline:none; }
+  .pchart .hit:hover ~ .col, .pchart g.slot:hover .col, .pchart g.slot:focus-within .col{ opacity:.78; }
+  .pchart .tline{ stroke:var(--ink-2); stroke-width:1; }
+  .pchart .tlab{ fill:var(--ink-2); font-size:10px; font-weight:700; }
+  .pchart .lbl{ fill:var(--ink); font-size:11px; font-weight:700; }
+  .pchart .std{ stroke:var(--ink); stroke-width:2; }
+  .pchart .rowlab{ fill:var(--ink); font-size:12px; font-weight:700; }
+  .pchart .collab{ fill:var(--ink-2); font-size:10px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
+  .legend{ display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--ink-2); margin-top:6px; }
+  .legend span{ display:inline-flex; align-items:center; gap:6px; }
+  .legend i{ display:inline-block; width:12px; height:12px; border-radius:3px; background:var(--viz); }
+  .legend i.soft{ background:var(--viz-soft); }
+  .legend i.good{ background:var(--good); } .legend i.warn{ background:var(--warn); } .legend i.bad{ background:var(--crit); }
+  .legend i.ghost{ background:var(--good); opacity:.45; }
+  .legend i.line{ width:14px; height:0; border-top:2px solid var(--ink-2); border-radius:0; }
+  .legend i.std{ width:2px; height:12px; background:var(--ink); border-radius:0; }
+  .ptables{ display:none; margin-top:14px; }
+  .ptables.on{ display:grid; grid-template-columns:1.2fr 1fr; gap:14px; }
+  .detail table{ width:100%; border-collapse:collapse; font-size:13px; }
+  .detail th{ text-align:left; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-2); padding:6px; border-bottom:2px solid var(--axis); }
+  .detail td{ padding:5px 6px; border-bottom:1px solid var(--axis); }
+  .detail th.n, .detail td.n{ text-align:right; font-variant-numeric:tabular-nums; }
+  #ptip{ position:fixed; z-index:50; pointer-events:none; background:var(--ink); color:var(--surface); font-size:12px; padding:8px 10px; border-radius:6px; box-shadow:0 4px 14px rgba(0,0,0,.25); display:none; max-width:260px; }
+  body.dark #ptip{ background:#fff; color:#0b0b0b; }
+  #ptip b{ display:block; font-size:13px; margin-bottom:3px; }
+  #ptip div{ display:flex; justify-content:space-between; gap:14px; }
+  #ptip div strong{ font-variant-numeric:tabular-nums; }
+  #ptip div span{ opacity:.8; }
+  @media (max-width:900px){ .pgrid{ grid-template-columns:1fr; } .ptiles{ grid-template-columns:1fr 1fr; } .ptables.on{ grid-template-columns:1fr; } }
+  @media (max-width:800px){ .tiles.kpis{ grid-template-columns:1fr 1fr; grid-auto-flow:row; } .wrap{ padding:10px; } }
+</style>
+</head>
+<body>
+<div class="bar" data-page="people" data-sub="People" data-tools="reset"></div>
+<main class="wrap">
+  <div class="controls">
+    <div class="ctl"><div class="ctl-h">Period</div>
+      <div class="seg" id="period"><button data-days="7" class="on">Week</button><button data-days="30">Month</button><button data-days="365">Year</button></div></div>
+    <div class="ctl"><div class="ctl-h">Shift</div>
+      <select class="dd" id="shift"><option value="all">All shifts</option></select></div>
+    <div class="ctl"><div class="ctl-h">Find</div>
+      <input class="dd" id="find" placeholder="user ID or part of one" autocomplete="off"></div>
+    <div style="margin-left:auto" class="hint" id="stamp"></div>
+  </div>
+  <div class="tiles kpis" id="kpis"></div>
+  <div id="detail"></div>
+  <div class="card" data-mod="people">
+    <h2>Everyone who picked <span id="sub"></span></h2>
+    <div class="tablewrap"><table class="people" id="tbl"><thead></thead><tbody></tbody></table></div>
+    <div class="hint" id="note" style="margin-top:8px"></div>
+  </div>
+</main>
+<div id="ptip" role="tooltip"></div>
+<script src="/web/theme.js"></script>
+<script src="/web/board2.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const H = window.SLH;
+const esc = H.esc;
+let DAYS = 7, SHIFT = 'all', FIND = '', SORT = 'pct', ASC = false, ONLY = null, REP = null;
+/* ?who=ID opens that person rather than the list: the review page links
+   back here, and a link that lands on everyone is not a link back */
+ONLY = (new URLSearchParams(location.search).get('who') || '').trim().toUpperCase() || null;
+
+/* the columns: key, label, right-aligned, how to read it from a person */
+const COLS = [
+  { k: 'who', lab: 'Picker', v: p => p.who, text: true },
+  { k: 'days', lab: 'Days', n: true, v: p => p.days },
+  { k: 'total', lab: 'Picks', n: true, v: p => p.total },
+  { k: 'lines', lab: 'Lines', n: true, v: p => p.lines },
+  { k: 'rate', lab: 'Picks / h', n: true, v: p => p.rate },
+  { k: 'pct', lab: '% of target', n: true, v: p => p.pct == null ? -1 : p.pct },
+  { k: 'activeHours', lab: 'Active h', n: true, v: p => p.activeHours },
+  { k: 'util', lab: 'Productive', n: true, v: p => util(p) == null ? -1 : util(p) },
+  { k: 'area', lab: 'Mostly', v: p => mainArea(p), text: true },
+  { k: 'trend', lab: 'Trend', v: () => 0 }
+];
+/* productive time: active hours against the true picking hours of a shift
+   (the "true picking hours in a shift" setting) times the days they worked.
+   Breaks and closed hours are already outside active time, so 100% means
+   every pickable minute was spent picking. */
+function util(p){
+  const dh = REP && REP.dayHours > 0 ? REP.dayHours : 6.5;
+  const d = Math.max(1, p.days || 1);
+  if(!p.activeHours) return null;
+  return Math.min(100, Math.round(p.activeHours / (d * dh) * 100));
+}
+function mainArea(p){ let best = '', n = -1; for(const a in (p.byArea || {})) if(p.byArea[a] > n){ n = p.byArea[a]; best = a; } return best; }
+let BANDS = { good: 100, warn: 85 };      // until a report says otherwise
+const pctCls = v => v == null ? '' : v >= BANDS.good ? 'good' : v >= BANDS.warn ? 'warn' : 'bad';
+/* productive time against its floor: green at the floor, amber within 15 under it, red below */
+const floor = () => (REP && REP.prodFloor != null) ? REP.prodFloor : 75;
+const utilCls = v => v == null ? '' : v >= floor() ? 'good' : v >= floor() - 15 ? 'warn' : 'bad';
+const fmtH = h => { const m = Math.round((h || 0) * 60); return Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0'); };
+const fmtDay = k => { const d = new Date(k + 'T12:00:00'); return d.toLocaleDateString(undefined, { weekday: 'short', month: 'numeric', day: 'numeric' }); };
+const fmtMD = k => { const d = new Date(k + 'T12:00:00'); return d.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }); };
+
+function spark(vals){
+  const v = vals.map(x => x == null ? null : x);
+  const have = v.filter(x => x != null);
+  if(have.length < 2) return '<span class="muted">' + (have.length ? '1 day' : '') + '</span>';
+  const W = 110, Hh = 26, mx = Math.max(120, ...have), mn = 0;
+  const x = i => (i / Math.max(1, v.length - 1)) * (W - 4) + 2;
+  const y = val => Hh - 2 - ((val - mn) / (mx - mn)) * (Hh - 4);
+  let d = '', prev = null;
+  v.forEach((val, i) => { if(val == null){ prev = null; return; } d += (prev == null ? 'M' : 'L') + x(i).toFixed(1) + ' ' + y(val).toFixed(1) + ' '; prev = val; });
+  const goal = y(100).toFixed(1);
+  return '<svg class="spark" viewBox="0 0 ' + W + ' ' + Hh + '"><line x1="0" y1="' + goal + '" x2="' + W + '" y2="' + goal + '" stroke="var(--axis)" stroke-dasharray="3 3"/>' +
+    '<path d="' + d + '" fill="none" stroke="var(--blue)" stroke-width="1.8"/></svg>';
+}
+
+async function load(){
+  try{
+    const r = await fetch('/api/pickers?days=' + DAYS + (SHIFT !== 'all' ? '&shift=' + encodeURIComponent(SHIFT) : ''), { cache: 'no-store' });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    REP = await r.json();
+    if(REP && REP.bands) BANDS = REP.bands;   // one definition, set on the picker page
+    PERSON = null;          // the person on show is fetched fresh alongside
+    render();
+  }catch(e){
+    $('tbl').querySelector('tbody').innerHTML = '<tr><td colspan="10" class="empty">Cannot reach the service. Try again in a moment.</td></tr>';
+  }
+}
+function series(who){
+  const s = REP.series;
+  if(!s || !s.people || !s.people[who]) return [];
+  return s.people[who].map(v => v ? v.pct : null);
+}
+function render(){
+  const rep = REP; if(!rep) return;
+  const sh = $('shift');
+  if(rep.shiftNames && sh.options.length !== rep.shiftNames.length + 1){
+    sh.innerHTML = '<option value="all">All shifts</option>' + rep.shiftNames.map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>').join('');
+    sh.value = rep.shiftNames.indexOf(SHIFT) >= 0 ? SHIFT : 'all';
+  }
+  const label = DAYS === 7 ? 'last 7 days' : DAYS === 30 ? 'last 30 days' : 'last 365 days';
+  $('stamp').textContent = rep.daysWithData ? ('from ' + rep.daysWithData + ' day' + (rep.daysWithData === 1 ? '' : 's') + ' of records' + (rep.shiftName ? ', ' + rep.shiftName + ' shift only' : '')) : 'no records for this period';
+  $('sub').textContent = label + (rep.shiftName ? ', ' + rep.shiftName + ' shift' : '') + ', at least ' + (rep.minPicks || 0) + ' picks';
+
+  let people = rep.people.filter(p => p.total > 0);
+  if(FIND) people = people.filter(p => p.who.toLowerCase().indexOf(FIND) >= 0);
+  const all = people;
+  if(ONLY && !people.some(p => p.who === ONLY)) ONLY = null;
+  if(ONLY) people = people.filter(p => p.who === ONLY);
+  const col = COLS.find(c => c.k === SORT) || COLS[5];
+  people.sort((a, b) => { const x = col.v(a), y = col.v(b); const r = col.text ? String(x).localeCompare(String(y)) : (x - y); return ASC ? r : -r; });
+
+  // the crew
+  const s = rep.summary;
+  const us = all.map(util).filter(x => x != null);
+  const avgUtil = us.length ? Math.round(us.reduce((t, x) => t + x, 0) / us.length) : null;
+  $('kpis').innerHTML =
+    tile('Pickers', all.length, 'with ' + (rep.minPicks || 0) + '+ picks, ' + label) +
+    tile('Picks', (s.picks || 0).toLocaleString(), (s.hours || 0).toLocaleString() + ' active hours') +
+    tile('Crew rate', (s.rate || 0) + '<small>/h</small>', 'picks an active hour, everyone together') +
+    tile('Against target', s.pct == null ? '&ndash;' : s.pct + '<small>%</small>', s.pct == null ? 'no standard to measure against' : s.pct >= 100 ? 'at or over the standard' : 'under the standard', pctCls(s.pct)) +
+    tile('Productive time', avgUtil == null ? '&ndash;' : avgUtil + '<small>%</small>', 'of ' + (rep.dayHours || 6.5) + ' picking hours a shift, floor ' + floor() + '%', utilCls(avgUtil));
+
+  // the table
+  $('tbl').querySelector('thead').innerHTML = '<tr>' + COLS.map(c => '<th class="' + (c.n ? 'n ' : '') + (c.k === SORT ? 'on ' + (ASC ? 'asc' : '') : '') + '" data-k="' + c.k + '">' + c.lab + '</th>').join('') + '</tr>';
+  $('tbl').querySelector('tbody').innerHTML = people.length ? people.map(p => {
+    const u = util(p);
+    return '<tr>' +
+      '<td><button class="who' + (ONLY === p.who ? ' on' : '') + '" data-who="' + esc(p.who) + '" title="' + (ONLY ? 'Click for everyone' : 'Click to see this person on their own') + '">' + esc(p.who) + '</button></td>' +
+      '<td class="n">' + p.days + '</td><td class="n">' + p.total.toLocaleString() + '</td><td class="n">' + (p.lines || 0).toLocaleString() + '</td>' +
+      '<td class="n">' + p.rate + '</td>' +
+      '<td class="n"><span class="bar2"><i class="' + pctCls(p.pct) + '" style="width:' + Math.min(100, (p.pct || 0) / 1.5).toFixed(0) + '%"></i></span><span class="pct ' + pctCls(p.pct) + '">' + (p.pct == null ? '&ndash;' : p.pct + '%') + '</span></td>' +
+      '<td class="n">' + fmtH(p.activeHours) + '</td>' +
+      '<td class="n"><span class="pct ' + utilCls(u) + '">' + (u == null ? '&ndash;' : u + '%') + '</span></td>' +
+      '<td>' + esc(mainArea(p)) + '</td>' +
+      '<td>' + spark(series(p.who)) + '</td></tr>';
+  }).join('') : '<tr><td colspan="10" class="empty">' + (FIND ? 'Nobody matches "' + esc(FIND) + '".' : 'No picks recorded for this period.') + '</td></tr>';
+  $('note').textContent = 'Picks / h is picks per active hour. % of target is those picks against the standard for the mix of areas each person worked, over the time they worked each area. Productive is active hours against ' + (rep.dayHours || 6.5) + ' true picking hours a shift for the days worked; it reads green from ' + floor() + '%.' +
+    (rep.minor && rep.minor.length ? ' ' + rep.minor.length + ' more touched fewer than ' + rep.minPicks + ' picks and are left off.' : '');
+  document.querySelectorAll('#tbl th').forEach(th => th.onclick = () => { const k = th.dataset.k; if(k === 'trend') return; if(SORT === k) ASC = !ASC; else { SORT = k; ASC = k === 'who' || k === 'area'; } render(); });
+  document.querySelectorAll('#tbl .who').forEach(b => b.onclick = () => { ONLY = ONLY === b.dataset.who ? null : b.dataset.who; render(); });
+  renderDetail(ONLY ? rep.people.find(p => p.who === ONLY) : null);
+}
+let tileN = 0;
+function tile(label, val, sub, cls){
+  return '<div class="tile" data-mod="kpi-' + (tileN++) + '"><div class="lab">' + label + '</div><div class="val">' + val + '</div><div class="sub ' + (cls || '') + '">' + (sub || '&nbsp;') + '</div></div>';
+}
+
+/* ---- one person --------------------------------------------------------
+   Everything below is drawn from /api/person: the same daily rollup the
+   picker page reads, grouped into yesterday, last week, this period, the
+   months and the year. */
+let PERSON = null, PWHO = null, PMETRIC = 'pct', PTABLE = false;
+const METRICS = {
+  pct:   { lab: '% of target', val: s => s && s.pct, fmt: v => v == null ? '–' : v + '%', line: 100, lineLab: 'standard' },
+  rate:  { lab: 'Picks an hour', val: s => s && s.rate, fmt: v => v == null ? '–' : v + '/h' },
+  picks: { lab: 'Picks', val: s => s && s.picks, fmt: v => v == null ? '–' : (v || 0).toLocaleString() },
+  hours: { lab: 'Active hours', val: s => s && s.hours, fmt: v => v == null ? '–' : fmtH(v) }
+};
+const periodLab = () => DAYS === 7 ? 'This week' : DAYS === 30 ? 'This month' : 'This year';
+
+async function renderDetail(p){
+  const box = $('detail');
+  if(!p){ box.innerHTML = ''; PERSON = null; PWHO = null; return; }
+  if(!PERSON || PWHO !== p.who || PERSON._days !== DAYS || PERSON._shift !== SHIFT){
+    if(PERSON && PWHO === p.who) box.style.opacity = .55;     // hold the last drawing while the next loads
+    let got;
+    try{
+      const r = await fetch('/api/person?who=' + encodeURIComponent(p.who) + '&days=' + DAYS + (SHIFT !== 'all' ? '&shift=' + encodeURIComponent(SHIFT) : ''), { cache: 'no-store' });
+      if(!r.ok) throw new Error('HTTP ' + r.status);
+      got = await r.json();
+    }catch(e){
+      box.style.opacity = 1;
+      box.innerHTML = '<div class="card detail"><div class="head"><h2>' + esc(p.who) + '</h2><button class="btn small" id="back">Everyone</button></div><div class="empty">Could not load this person: ' + esc(e.message) + '</div></div>';
+      $('back').onclick = () => { ONLY = null; render(); };
+      return;
+    }
+    if(ONLY !== p.who) return;          // they clicked away while it loaded
+    got._days = DAYS; got._shift = SHIFT;
+    PERSON = got; PWHO = p.who;
+  }
+  box.style.opacity = 1;
+  drawPerson(PERSON, p);
+}
+
+function drawPerson(P, p){
+  const box = $('detail');
+  const u = util(p);
+  const M = METRICS[PMETRIC];
+  const y = P.yesterday, w = P.lastWeek, per = P.period, yr = P.yearTotal;
+
+  const tiles =
+    ptile('Yesterday', y.has ? y : null, y.has ? fmtDay(y.key) : (y.lastDay ? 'no picks; last picked ' + fmtDay(y.lastDay) : 'no picks')) +
+    ptile('Last week', w.has ? w : null, fmtMD(w.from) + ' – ' + fmtMD(w.to) + (w.has ? ', ' + w.days + ' day' + (w.days === 1 ? '' : 's') : '')) +
+    ptile(periodLab(), per.has ? per : null, 'last ' + per.window + ' days' + (per.has ? ', ' + per.days + ' worked' : '')) +
+    ptile('Year', yr.picks ? yr : null, yr.estMonths ? yr.realMonths + ' months on file, ' + yr.estMonths + ' estimated from their average' : '12 months on file');
+
+  box.innerHTML =
+    '<div class="card detail" data-mod="detail">' +
+      '<div class="head"><h2>' + esc(p.who) + ' <span>' + p.total.toLocaleString() + ' picks in ' + fmtH(p.activeHours) + ' active over ' + p.days + ' day' + (p.days === 1 ? '' : 's') +
+        (p.pct != null ? ', ' + p.pct + '% of target' : '') + (u != null ? ', ' + u + '% productive' : '') + '</span></h2>' +
+        '<div class="seg" id="pmetric">' + Object.keys(METRICS).map(k => '<button data-m="' + k + '"' + (k === PMETRIC ? ' class="on"' : '') + '>' + METRICS[k].lab + '</button>').join('') + '</div>' +
+        '<button class="btn small" id="ptable">' + (PTABLE ? 'Charts' : 'Table') + '</button>' +
+        '<button class="btn small" id="back">Everyone</button>' +
+        /* on its own at the right end of the row: it leaves this page for
+           another one, which the buttons beside it do not */
+        '<a class="btn small review" href="/review?who=' + encodeURIComponent(p.who) + (SHIFT !== 'all' ? '&shift=' + encodeURIComponent(SHIFT) : '') + '" title="Their last 5, 10, 15 and 20 worked days, laid out for a performance conversation">Review</a></div>' +
+      '<div class="ptiles">' + tiles + '</div>' +
+      '<div class="pgrid">' +
+        '<section class="pchart wide"><h3>' + esc(M.lab) + ' by month <span>the last twelve; lighter columns are months with no records, filled from their own average</span></h3>' +
+          '<div class="plot" data-plot="months"></div>' +
+          '<div class="legend"><span><i class="good"></i>at or over the standard</span><span><i class="warn"></i>within 15 under</span><span><i class="bad"></i>further under</span>' +
+            '<span><i class="ghost"></i>estimated month</span>' + (M.line ? '<span><i class="line"></i>' + M.lineLab + '</span>' : '') + '</div></section>' +
+        '<section class="pchart"><h3>Where the shift went <span>an average day of the ' + (P.shiftHours || 8) + ' paid hours; the figure over each month is its down time</span></h3>' +
+          '<div class="plot" data-plot="hours"></div>' +
+          '<div class="legend"><span><i class="good"></i>picking</span><span><i class="bad"></i>down time</span><span><i class="warn"></i>breaks &amp; setup</span><span><i class="line"></i>picking hours available</span></div></section>' +
+        '<section class="pchart"><h3>Areas, ' + periodLab().toLowerCase() + ' <span>each area against its own standard</span></h3>' +
+          '<div class="plot" data-plot="areas"></div></section>' +
+        '<section class="pchart wide"><h3>' + esc(M.lab) + ', day by day <span>' + (per.has ? fmtMD(per.from) + ' – ' + fmtMD(per.to) : 'nothing in this period') + '</span></h3>' +
+          '<div class="plot" data-plot="days"></div></section>' +
+      '</div>' +
+      '<div class="ptables' + (PTABLE ? ' on' : '') + '">' + tables(P) + '</div>' +
+    '</div>';
+
+  $('back').onclick = () => { ONLY = null; render(); };
+  $('ptable').onclick = () => { PTABLE = !PTABLE; drawPerson(P, p); };
+  document.querySelectorAll('#pmetric button').forEach(b => b.onclick = () => { PMETRIC = b.dataset.m; drawPerson(P, p); });
+  fillPlots(P);
+}
+
+/* Draw each plot at the width it actually has, so a pixel in the drawing is
+   a pixel on the screen: 11px axis text stays 11px instead of being scaled
+   up with the rest of the picture. Redrawn when the window changes width. */
+function fillPlots(P){
+  const box = $('detail');
+  const M = METRICS[PMETRIC];
+  const per = P.period;
+  box.querySelectorAll('.plot').forEach(el => {
+    const w = Math.max(280, Math.round(el.clientWidth));
+    const kind = el.dataset.plot;
+    if(kind === 'months') el.innerHTML = columns(P.year.map(m => ({ label: m.label, val: M.val(m), est: m.est, cls: pctCls(m.pct), tip: monthTip(m) })), { W: w, H: 230, line: M.line, lineLab: M.lineLab, fmt: M.fmt, aria: M.lab + ' by month' });
+    else if(kind === 'hours') el.innerHTML = shiftChart(P, w);
+    else if(kind === 'areas') el.innerHTML = areasChart(per, w);
+    else if(kind === 'days') el.innerHTML = daysChart(P.byDay, M, w);
+  });
+  wireTips(box);
+}
+let rzT = null;
+window.addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(() => { if(PERSON) fillPlots(PERSON); }, 160); });
+
+function ptile(lab, s, sub){
+  const has = !!(s && s.picks > 0);
+  const v = has ? (s.pct == null ? '–' : s.pct + '<small>%</small>') : '–';
+  const line = has ? s.picks.toLocaleString() + ' picks · ' + fmtH(s.hours) + ' picking · ' + s.rate + '/h' : 'no picks';
+  const d = has && s.shift && s.shift.perDay ? s.shift.perDay.down : null;
+  const down = d == null ? '' : '<div class="sub">' + fmtH(d) + ' down time a day</div>';
+  return '<div class="tile ptile"><div class="lab">' + esc(lab) + '</div><div class="val ' + pctCls(has ? s.pct : null) + '">' + v + '</div><div class="sub">' + esc(line) + '</div>' + down + '<div class="sub muted">' + esc(sub) + '</div></div>';
+}
+function monthTip(m){
+  if(!m.has && !m.est) return { title: m.label, rows: [['no records', '']] };
+  const rows = [['% of target', m.pct == null ? '–' : m.pct + '%'], ['Picks', (m.picks || 0).toLocaleString()], ['Lines', (m.lines || 0).toLocaleString()],
+                ['Picks an hour', m.rate + '/h'], ['Picking', fmtH(m.hours)], ['Down time', m.shift ? fmtH(m.shift.down) : '–'], ['Days', String(m.days)]];
+  return { title: m.label + (m.est ? ' – estimated' : ''), rows };
+}
+
+/* nice round ticks for an axis: 0 to a ceiling a little over the top value */
+function ticksFor(top, want){
+  if(!(top > 0)) top = 1;
+  const raw = top / (want || 4);
+  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * pow).find(s => s >= raw) || pow * 10;
+  const ceil = Math.ceil(top / step) * step;
+  const out = [];
+  for(let v = 0; v <= ceil + 1e-9; v += step) out.push(+v.toFixed(6));
+  return { step, ceil, ticks: out };
+}
+/* a column with a rounded top and a square base */
+function colPath(x, yTop, w, yBase){
+  const r = Math.min(4, w / 2, Math.max(0, yBase - yTop));
+  if(yBase - yTop <= 0) return '';
+  return 'M' + x.toFixed(1) + ',' + yBase.toFixed(1) + 'V' + (yTop + r).toFixed(1) + 'a' + r + ',' + r + ' 0 0 1 ' + r + ',-' + r +
+         'h' + (w - 2 * r).toFixed(1) + 'a' + r + ',' + r + ' 0 0 1 ' + r + ',' + r + 'V' + yBase.toFixed(1) + 'Z';
+}
+const tipAttr = t => ' data-tip="' + esc(JSON.stringify(t)) + '"';
+
+/* Columns over a set of labels: months or days. One series, the person's
+   own; the value on the last column and the highest, the rest in the
+   tooltip and the table. */
+function columns(items, opt){
+  opt = opt || {};
+  const W = opt.W || 720, Hh = opt.H || 210, padL = 44, padR = 14, padT = 12, padB = 26;
+  const vals = items.map(i => i.val).filter(v => v != null && isFinite(v));
+  if(!vals.length) return '<div class="empty">Nothing to draw yet.</div>';
+  const { ticks, ceil } = ticksFor(Math.max(...vals, opt.line || 0) * 1.08, 4);
+  const plotW = W - padL - padR, plotH = Hh - padT - padB;
+  const slot = plotW / items.length, bw = Math.min(24, slot * 0.62);
+  const x = i => padL + slot * i + (slot - bw) / 2;
+  const y = v => padT + plotH - (v / ceil) * plotH;
+  const base = padT + plotH;
+  let g = '<svg viewBox="0 0 ' + W + ' ' + Hh + '" role="img" aria-label="' + esc(opt.aria || 'columns') + '">';
+  g += '<g class="grid">' + ticks.map(v => '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y(v).toFixed(1) + '" y2="' + y(v).toFixed(1) + '"/>').join('') + '</g>';
+  g += '<g class="ax">' + ticks.map(v => '<text x="' + (padL - 8) + '" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end">' + (opt.fmtTick ? opt.fmtTick(v) : v.toLocaleString()) + '</text>').join('');
+  const every = items.length <= 16 ? 1 : Math.ceil(items.length / 12);
+  items.forEach((it, i) => { if(i % every === 0 || i === items.length - 1) g += '<text x="' + (x(i) + bw / 2).toFixed(1) + '" y="' + (Hh - 8) + '" text-anchor="middle">' + esc(it.label) + '</text>'; });
+  g += '</g>';
+  if(opt.line != null && opt.line <= ceil) g += '<line class="tline" x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y(opt.line).toFixed(1) + '" y2="' + y(opt.line).toFixed(1) + '"/>' +
+    '<text class="tlab" x="' + (W - padR) + '" y="' + (y(opt.line) - 4).toFixed(1) + '" text-anchor="end">' + esc(opt.lineLab || '') + '</text>';
+  const maxV = Math.max(...vals);
+  let maxAt = items.findIndex(it => it.val === maxV);
+  const lastAt = items.map((it, i) => it.val != null ? i : -1).filter(i => i >= 0).pop();
+  items.forEach((it, i) => {
+    const has = it.val != null && isFinite(it.val);
+    g += '<g class="slot">';
+    if(has) g += '<path class="col' + (it.cls ? ' ' + it.cls : '') + (it.est ? ' est' : '') + '" d="' + colPath(x(i), y(it.val), bw, base) + '"/>';
+    if(has && (i === maxAt || i === lastAt)) g += '<text class="lbl" x="' + (x(i) + bw / 2).toFixed(1) + '" y="' + (y(it.val) - 5).toFixed(1) + '" text-anchor="middle">' + esc(opt.fmt ? opt.fmt(it.val) : String(it.val)) + '</text>';
+    g += '<rect class="hit" tabindex="0" x="' + (padL + slot * i).toFixed(1) + '" y="' + padT + '" width="' + slot.toFixed(1) + '" height="' + plotH + '"' + tipAttr(it.tip || { title: it.label, rows: [[opt.lab || '', has ? (opt.fmt ? opt.fmt(it.val) : it.val) : '–']] }) + '/>';
+    g += '</g>';
+  });
+  return g + '</svg>';
+}
+
+/* Where the paid shift went, an average day at a time.
+
+   The shift is bought whole. Some of it can never be picking - breaks and
+   setting up, which is the difference between the paid hours and the true
+   picking hours, an hour and a half by default - so that sits on top as a
+   band of the same height on every column, and is not a criticism of
+   anybody. What is left between the picking and that band is down time
+   nothing accounts for, and it is the only part of the column that moves.
+   That is the figure this chart exists to show. */
+function shiftChart(P, width){
+  const months = P.months.filter(m => m.has && m.shift && m.shift.perDay);
+  if(!months.length) return '<div class="empty">Nothing to draw yet.</div>';
+  const all = P.months;
+  const W = width || 360, Hh = 230, padL = 34, padR = 10, padT = 30, padB = 26;
+  const shiftH = P.shiftHours || 8, dayH = P.dayHours || 6.5;
+  const { ticks, ceil } = ticksFor(shiftH, 4);
+  const plotW = W - padL - padR, plotH = Hh - padT - padB;
+  const slot = plotW / all.length, bw = Math.min(22, slot * 0.62);
+  const x = i => padL + slot * i + (slot - bw) / 2;
+  const y = v => padT + plotH - (v / ceil) * plotH;
+  const base = padT + plotH;
+  let g = '<svg viewBox="0 0 ' + W + ' ' + Hh + '" role="img" aria-label="Where the paid shift went, by month">';
+  g += '<g class="grid">' + ticks.map(v => '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y(v).toFixed(1) + '" y2="' + y(v).toFixed(1) + '"/>').join('') + '</g>';
+  g += '<g class="ax">' + ticks.map(v => '<text x="' + (padL - 6) + '" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end">' + v + '</text>').join('');
+  all.forEach((m, i) => { if(i % 2 === 0 || i === all.length - 1) g += '<text x="' + (x(i) + bw / 2).toFixed(1) + '" y="' + (Hh - 8) + '" text-anchor="middle">' + esc(m.label.split(' ')[0]) + '</text>'; });
+  g += '</g>';
+  /* where the picking hours run out and the allowance begins */
+  g += '<line class="tline" x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y(dayH).toFixed(1) + '" y2="' + y(dayH).toFixed(1) + '"/>';
+  all.forEach((m, i) => {
+    g += '<g class="slot">';
+    const d = m.has && m.shift ? m.shift.perDay : null;
+    if(d){
+      /* bottom up: picking, then the down time nobody can account for, then
+         the allowance as a cap of the same height on every column. A 2px
+         gap in the surface colour keeps the three readable as three. */
+      const seg = (from, size, cls) => {
+        const top = y(from + size), bot = y(from);
+        const h = bot - top - 2;
+        if(h <= 0.5) return '';
+        return '<rect class="col ' + cls + '" x="' + x(i).toFixed(1) + '" y="' + top.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="2"/>';
+      };
+      g += seg(0, d.picking, 'picking') + seg(d.picking, d.down, 'down') + seg(d.picking + d.down, d.allowance, 'allow');
+      if(d.down >= 0.1) g += '<text class="lbl" x="' + (x(i) + bw / 2).toFixed(1) + '" y="' + (padT - 8).toFixed(1) + '" text-anchor="middle">' + fmtH(d.down) + '</text>';
+    }
+    const tip = d ? { title: m.label + (m.est ? ' - estimated' : ''), rows: [
+        ['Picking', fmtH(d.picking) + ' a day'], ['Down time', fmtH(d.down) + ' a day'], ['Breaks & setup', fmtH(d.allowance) + ' a day'],
+        ['Paid shift', fmtH(d.paid)], ['Productive', (m.shift.prod == null ? '–' : m.shift.prod + '%')],
+        ['Days worked', String(m.days)], ['Down time over the month', fmtH(m.shift.down)]] }
+      : { title: m.label, rows: [['no records', '']] };
+    g += '<rect class="hit" tabindex="0" x="' + (padL + slot * i).toFixed(1) + '" y="' + padT + '" width="' + slot.toFixed(1) + '" height="' + plotH + '"' + tipAttr(tip) + '/></g>';
+  });
+  return g + '</svg>';
+}
+
+
+/* one row per area worked: picks, hours, and the rate against the standard,
+   which is drawn as a mark on the rate bar */
+function areasChart(per, width){
+  const stat = (per && per.areaStat) || {};
+  const areas = Object.keys(stat).sort((a, b) => (stat[b].picks || 0) - (stat[a].picks || 0));
+  if(!areas.length) return '<div class="empty">No areas in this period.</div>';
+  const rowH = 32, labW = 96, gap = 22, top = 22;
+  const W = width || 360, cols = 3, colW = (W - labW - gap * (cols - 1)) / cols;
+  const Hh = top + rowH * areas.length + 6;
+  const maxP = Math.max(...areas.map(a => stat[a].picks || 0), 1);
+  const maxHrs = Math.max(...areas.map(a => stat[a].hours || 0), 0.1);
+  const maxR = Math.max(...areas.map(a => Math.max(stat[a].rate || 0, stat[a].target || 0)), 1) * 1.1;
+  const cx = c => labW + c * (colW + gap);
+  let g = '<svg viewBox="0 0 ' + W + ' ' + Hh + '" role="img" aria-label="Picks, hours and rate by area">';
+  g += '<g class="ax">' + ['Picks', 'Hours', 'Picks / h vs standard'].map((t, c) => '<text class="collab" x="' + cx(c) + '" y="12">' + t + '</text>').join('') + '</g>';
+  /* room for the widest label in each column, so the bars stop short of it */
+  const txt = t => String(t).length * 6.1 + 6;
+  const room = [
+    Math.max(...areas.map(a => txt((stat[a].picks || 0).toLocaleString()))),
+    Math.max(...areas.map(a => txt(fmtH(stat[a].hours)))),
+    Math.max(...areas.map(a => txt((stat[a].rate || 0) + (stat[a].pct != null ? ' (' + stat[a].pct + '%)' : ''))))
+  ].map(w => Math.min(w, colW * 0.55));
+  areas.forEach((a, i) => {
+    const s = stat[a], yy = top + rowH * i, bh = 14, by = yy + (rowH - bh) / 2;
+    const barW = c => colW - room[c];
+    const rc = pctCls(s.pct);
+    const bar = (c, frac, cls) => '<rect class="col' + (rc ? ' ' + rc : '') + (cls ? ' ' + cls : '') + '" x="' + cx(c) + '" y="' + by + '" width="' + Math.max(1, Math.min(1, frac) * barW(c)).toFixed(1) + '" height="' + bh + '" rx="3"/>';
+    const lab = (c, frac, text) => '<text class="lbl" x="' + (cx(c) + Math.max(1, Math.min(1, frac) * barW(c)) + 5).toFixed(1) + '" y="' + (by + bh - 3) + '">' + esc(text) + '</text>';
+    g += '<g class="slot"><text class="rowlab" x="0" y="' + (by + bh - 3) + '">' + esc(a.length > 13 ? a.slice(0, 12) + '…' : a) + '</text>';
+    g += bar(0, (s.picks || 0) / maxP) + lab(0, (s.picks || 0) / maxP, (s.picks || 0).toLocaleString());
+    g += bar(1, (s.hours || 0) / maxHrs) + lab(1, (s.hours || 0) / maxHrs, fmtH(s.hours));
+    g += bar(2, (s.rate || 0) / maxR) + lab(2, (s.rate || 0) / maxR, (s.rate || 0) + (s.pct != null ? ' (' + s.pct + '%)' : ''));
+    if(s.target > 0){ const tx = (cx(2) + Math.min(1, s.target / maxR) * barW(2)).toFixed(1);
+      g += '<line class="std" x1="' + tx + '" x2="' + tx + '" y1="' + (by - 3) + '" y2="' + (by + bh + 3) + '"/>'; }
+    g += '<rect class="hit" tabindex="0" x="0" y="' + yy + '" width="' + W + '" height="' + rowH + '"' +
+      tipAttr({ title: a, rows: [['Picks', (s.picks || 0).toLocaleString()], ['Hours in area', fmtH(s.hours)], ['Picks an hour', s.rate + '/h'], ['Standard', s.target ? s.target + '/h' : 'none'], ['% of standard', s.pct == null ? '–' : s.pct + '%']] }) + '/></g>';
+  });
+  g += '</svg><div class="legend"><span><i class="good"></i>at or over</span><span><i class="warn"></i>within 15 under</span><span><i class="bad"></i>further under</span>' +
+    '<span><i class="std"></i>standard for the area</span></div>' +
+    '<div class="hint" style="margin-top:4px">Lines are counted per person, not per area: ' + ((per.lines || 0).toLocaleString()) + ' this period, ' + (per.lineRate || 0) + ' an hour.</div>';
+  return g;
+}
+
+/* the period a day at a time; past two months, a week at a time */
+function daysChart(byDay, M, width){
+  if(!byDay || !byDay.length) return '<div class="empty">No picks in this period.</div>';
+  let items;
+  if(byDay.length > 60){
+    const weeks = {};
+    byDay.forEach(d => {
+      const dt = new Date(d.key + 'T12:00:00'); dt.setDate(dt.getDate() - ((dt.getDay() + 6) % 7));
+      const k = dt.toISOString().slice(0, 10);
+      (weeks[k] = weeks[k] || []).push(d);
+    });
+    items = Object.keys(weeks).sort().map(k => {
+      const list = weeks[k];
+      const picks = list.reduce((t, d) => t + d.picks, 0), lines = list.reduce((t, d) => t + d.lines, 0), hours = list.reduce((t, d) => t + d.hours, 0), worked = list.reduce((t, d) => t + d.worked, 0);
+      const exp = list.reduce((t, d) => t + (d.pct != null ? d.picks / (d.pct / 100) : 0), 0);
+      const s = { picks, lines, hours: +hours.toFixed(2), worked, rate: hours ? +(picks / hours).toFixed(1) : 0, pct: exp > 0 ? Math.round(picks / exp * 100) : null };
+      return { label: 'wk ' + fmtMD(k), val: M.val(s), cls: pctCls(s.pct), tip: { title: 'Week of ' + fmtDay(k) + ', ' + list.length + ' day' + (list.length === 1 ? '' : 's'), rows: dayRows(s) } };
+    });
+  } else {
+    items = byDay.map(d => ({ label: byDay.length > 14 ? fmtMD(d.key) : fmtDay(d.key), val: M.val(d), cls: pctCls(d.pct), tip: { title: fmtDay(d.key), rows: dayRows(d) } }));
+  }
+  return columns(items, { W: width, H: 230, line: M.line, lineLab: M.lineLab, fmt: M.fmt, aria: M.lab + ' by day' });
+}
+const dayRows = d => [['% of target', d.pct == null ? '–' : d.pct + '%'], ['Picks', d.picks.toLocaleString()], ['Lines', (d.lines || 0).toLocaleString()], ['Picks an hour', d.rate + '/h'],
+  ['Picking', fmtH(d.hours)], ['Down time', d.shift ? fmtH(d.shift.down) : '–'], ['On the floor', fmtH(d.worked)]];
+
+/* the same numbers as rows, for anyone who wants them that way */
+function tables(P){
+  const days = P.byDay.slice().reverse();
+  const stat = (P.period && P.period.areaStat) || {};
+  const areas = Object.keys(stat).sort((a, b) => (stat[b].picks || 0) - (stat[a].picks || 0));
+  return '<div><table><thead><tr><th>Day</th><th class="n">Picks</th><th class="n">Lines</th><th class="n">Picking</th><th class="n">Down</th><th class="n">On floor</th><th class="n">Picks / h</th><th class="n">% of target</th></tr></thead><tbody>' +
+      days.map(d => '<tr><td>' + fmtDay(d.key) + '</td><td class="n">' + d.picks + '</td><td class="n">' + (d.lines || 0) + '</td><td class="n">' + fmtH(d.hours) + '</td><td class="n">' + (d.shift ? fmtH(d.shift.down) : '&ndash;') + '</td><td class="n">' + fmtH(d.worked) + '</td><td class="n">' + d.rate + '</td><td class="n pct ' + pctCls(d.pct) + '">' + (d.pct == null ? '&ndash;' : d.pct + '%') + '</td></tr>').join('') +
+      '</tbody></table></div>' +
+    '<div><table><thead><tr><th>Month</th><th class="n">Picks</th><th class="n">Picking</th><th class="n">Down</th><th class="n">Picks / h</th><th class="n">%</th></tr></thead><tbody>' +
+      P.year.map(m => '<tr' + (m.est ? ' class="muted"' : '') + '><td>' + esc(m.label) + (m.est ? ' (est.)' : '') + '</td><td class="n">' + (m.picks || 0).toLocaleString() + '</td><td class="n">' + fmtH(m.hours) + '</td><td class="n">' + (m.shift ? fmtH(m.shift.down) : '&ndash;') + '</td><td class="n">' + (m.rate || 0) + '</td><td class="n pct ' + pctCls(m.pct) + '">' + (m.pct == null ? '&ndash;' : m.pct + '%') + '</td></tr>').join('') +
+      '</tbody></table>' +
+      '<table style="margin-top:12px"><thead><tr><th>Area</th><th class="n">Picks</th><th class="n">Hours</th><th class="n">Rate</th><th class="n">Standard</th><th class="n">%</th></tr></thead><tbody>' +
+      areas.map(a => { const st = stat[a]; return '<tr><td>' + esc(a) + '</td><td class="n">' + st.picks + '</td><td class="n">' + fmtH(st.hours) + '</td><td class="n">' + st.rate + '</td><td class="n">' + (st.target || '&ndash;') + '</td><td class="n pct ' + pctCls(st.pct) + '">' + (st.pct == null ? '&ndash;' : st.pct + '%') + '</td></tr>'; }).join('') +
+      '</tbody></table></div>';
+}
+
+/* one tooltip for every mark: built with textContent, because names come
+   from SAP and are not ours to trust */
+function wireTips(root){
+  const tip = $('ptip');
+  const show = (el, ev) => {
+    let t; try{ t = JSON.parse(el.getAttribute('data-tip')); }catch(e){ return; }
+    tip.textContent = '';
+    const b = document.createElement('b'); b.textContent = t.title || ''; tip.appendChild(b);
+    (t.rows || []).forEach(([k, v]) => { const d = document.createElement('div'); const s = document.createElement('span'); s.textContent = k; const st = document.createElement('strong'); st.textContent = v; d.appendChild(s); d.appendChild(st); tip.appendChild(d); });
+    tip.style.display = 'block';
+    place(ev, el);
+  };
+  const place = (ev, el) => {
+    let px, py;
+    if(ev && ev.clientX != null){ px = ev.clientX; py = ev.clientY; }
+    else { const r = el.getBoundingClientRect(); px = r.left + r.width / 2; py = r.top; }
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    let left = px + 14, topp = py + 14;
+    if(left + w > window.innerWidth - 8) left = px - w - 14;
+    if(topp + h > window.innerHeight - 8) topp = py - h - 14;
+    tip.style.left = Math.max(4, left) + 'px'; tip.style.top = Math.max(4, topp) + 'px';
+  };
+  const hide = () => { tip.style.display = 'none'; };
+  root.querySelectorAll('.hit').forEach(el => {
+    el.addEventListener('pointerenter', ev => show(el, ev));
+    el.addEventListener('pointermove', ev => place(ev, el));
+    el.addEventListener('pointerleave', hide);
+    el.addEventListener('focus', () => show(el, null));
+    el.addEventListener('blur', hide);
+  });
+}
+
+document.querySelectorAll('#period button').forEach(b => b.onclick = () => { document.querySelectorAll('#period button').forEach(x => x.classList.toggle('on', x === b)); DAYS = +b.dataset.days; load(); });
+$('shift').onchange = () => { SHIFT = $('shift').value; load(); };
+$('find').oninput = () => { FIND = $('find').value.trim().toLowerCase(); render(); };
+H.initModules('people', [['kpis'], ['detail']]);
+load();
+try{ const es = new EventSource('/api/events'); es.addEventListener('data', load); }catch(e){}
+setInterval(load, 120000);
+</script>
+</body>
+</html>

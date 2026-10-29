@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Staging Lane Health - Months</title>
+<link rel="stylesheet" href="/web/board2.css">
+<style>
+  /* A card per month, in the order they happened, each with the days inside
+     it drawn as bars. The point of the gallery is the shape across the
+     year rather than any one number: a month that fell away, a month that
+     held, a season that ran differently. Every card is the same scale as
+     every other card, because a gallery whose cards each rescale themselves
+     is twelve charts rather than one year. */
+  .wrap{ max-width:1500px; margin:0 auto; padding:16px 22px 40px; }
+  .controls{ display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px; }
+  .seg{ display:inline-flex; border:1px solid var(--axis); border-radius:6px; overflow:hidden; }
+  .seg button{ font:inherit; font-size:13px; font-weight:700; border:none; background:var(--tile); color:var(--ink-2); padding:6px 14px; cursor:pointer; }
+  .seg button + button{ border-left:1px solid var(--axis); }
+  .seg button.on{ background:var(--amber); color:#000; }
+  .ctl{ display:flex; flex-direction:column; gap:4px; }
+  .ctl-h{ font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-2); }
+  .hint{ font-size:12px; color:var(--muted); }
+  .tiles.kpis{ grid-template-columns:repeat(5, 1fr); grid-auto-flow:row; margin-top:4px; }
+  .kpis .tile .val{ font-size:34px; }
+  .kpis .tile .val.good{ color:var(--good); } .kpis .tile .val.warn{ color:#8a5a00; } .kpis .tile .val.bad{ color:var(--crit); }
+
+  .gallery{ display:grid; grid-template-columns:repeat(auto-fill, minmax(330px, 1fr)); gap:14px; margin-top:16px; }
+  .mo{ background:var(--tile); border:1px solid var(--ring); border-radius:8px; padding:12px 14px 10px; min-width:0; }
+  .mo.thin{ opacity:.72; }
+  .mo-h{ display:flex; align-items:baseline; gap:8px; margin-bottom:6px; }
+  .mo-h .nm{ font-weight:800; font-size:15px; }
+  .mo-h .dy{ font-size:12px; color:var(--muted); margin-left:auto; }
+  .mo-v{ display:flex; align-items:baseline; gap:10px; }
+  .mo-v .big{ font-size:38px; font-weight:700; line-height:1; font-variant-numeric:tabular-nums; }
+  .mo-v .big.good{ color:var(--good); } .mo-v .big.warn{ color:#8a5a00; } .mo-v .big.bad{ color:var(--crit); }
+  .mo-v .unit{ font-size:13px; color:var(--ink-2); font-weight:600; }
+  .mo-v .dlt{ margin-left:auto; font-size:13px; font-weight:800; font-variant-numeric:tabular-nums; }
+  .mo-v .dlt.good{ color:var(--good); } .mo-v .dlt.bad{ color:var(--crit); } .mo-v .dlt.flat{ color:var(--muted); }
+  svg.mchart{ width:100%; height:96px; display:block; margin:8px 0 2px; overflow:visible; }
+  svg.mchart .ref{ stroke:var(--axis); stroke-width:1; stroke-dasharray:3 3; }
+  svg.mchart .reft{ font-size:9px; fill:var(--muted); }
+  svg.mchart rect.b{ }
+  svg.mchart rect.we{ opacity:.45; }
+  .mo-x{ display:flex; justify-content:space-between; align-items:baseline; font-size:10px; color:var(--muted); margin:-2px 0 2px; }
+  .mo-x .rf{ font-weight:700; }
+  .mo-f{ display:flex; gap:12px; font-size:12px; color:var(--ink-2); font-variant-numeric:tabular-nums; border-top:1px solid var(--hair); padding-top:6px; margin-top:4px; flex-wrap:wrap; }
+  .mo-f b{ color:var(--ink); }
+  .areas{ margin-top:8px; display:grid; gap:3px; }
+  .ar{ display:grid; grid-template-columns:1fr 54px 40px; gap:6px; align-items:center; font-size:11.5px; }
+  .ar .an{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink-2); }
+  .ar .ab{ height:8px; background:var(--blue-soft); border-radius:2px; overflow:hidden; }
+  .ar .ab i{ display:block; height:100%; background:var(--blue); }
+  .ar .ab i.good{ background:var(--good); } .ar .ab i.warn{ background:var(--amber); } .ar .ab i.bad{ background:var(--crit); }
+  .ar .ap{ text-align:right; font-weight:700; font-variant-numeric:tabular-nums; }
+  .ar .ap.good{ color:var(--good); } .ar .ap.warn{ color:#8a5a00; } .ar .ap.bad{ color:var(--crit); }
+  .mo .more{ font:inherit; font-size:11px; font-weight:700; background:none; border:none; color:var(--ink-2); cursor:pointer; padding:4px 0 0; text-decoration:underline; }
+  .mo .more:hover{ color:var(--amber); }
+  .daytab{ width:100%; border-collapse:collapse; font-size:11.5px; margin-top:6px; }
+  .daytab th{ text-align:left; font-size:10px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); padding:3px 4px; border-bottom:1px solid var(--axis); }
+  .daytab td{ padding:2px 4px; border-bottom:1px solid var(--hair); font-variant-numeric:tabular-nums; }
+  .daytab th.n, .daytab td.n{ text-align:right; }
+  .daytab tr.we td{ color:var(--muted); }
+  .empty{ padding:30px; text-align:center; color:var(--ink-2); }
+  .empty b{ display:block; font-size:16px; color:var(--ink); margin-bottom:6px; }
+  @media (max-width:800px){ .tiles.kpis{ grid-template-columns:1fr 1fr; } .wrap{ padding:10px; } .gallery{ grid-template-columns:1fr; } }
+
+  /* ---- ?compact=1: a quarter of a wall panel ----
+
+     A quarter of a 1080p screen is short and wide and read from across a
+     floor. The ordinary gallery wraps its cards down the page, which in a
+     box that shape means two cramped rows and then a field of nothing, all
+     of it shrunk to the two thirds the quarter had room for.
+
+     Compact lays the months out in one row that fills the height, and sizes
+     everything in vh rather than px. That second part is what makes it
+     legible: the quarter decides how wide the page is laid out and scales it
+     to fit, so a pixel is worth whatever that scale happens to be - but a vh
+     is always a hundredth of the box, and a box is always the same size on
+     the wall. The type comes out the same whatever width the frame picks.
+
+     It is asked for by the frame rather than guessed at from the window,
+     because a laptop is also short and wide and should get the real page. */
+  body.compact .wrap{ max-width:none; height:100vh; padding:1.6vh 1.4vw 1.2vh; display:flex; flex-direction:column; gap:0; box-sizing:border-box; }
+  body.compact .bar{ display:none; }
+  body.compact .controls{ margin-bottom:1.2vh; gap:1.2vw; flex:0 0 auto; }
+  body.compact .ctl-h{ font-size:1.8vh; }
+  body.compact .seg button{ font-size:2.2vh; padding:0.7vh 1vw; }
+  body.compact .hint#stamp{ font-size:2vh; }
+  body.compact .tiles.kpis{ flex:0 0 auto; gap:0.8vw; margin:0 0 1.2vh; }
+  body.compact .kpis .tile{ padding:0.8vh 1vw 0.7vh; border-radius:0.8vh; }
+  body.compact .kpis .tile .lab{ font-size:2vh; }
+  body.compact .kpis .tile .val{ font-size:5.2vh; }
+  body.compact .kpis .tile .sub{ font-size:1.8vh; min-height:0; margin-top:0.2vh; }
+
+  /* one row, every card an equal share of it, filling the height that is left */
+  body.compact .gallery{ flex:1 1 auto; min-height:0; margin:0;
+    display:grid; grid-auto-flow:column; grid-auto-columns:1fr; grid-template-columns:none; gap:0.8vw; }
+  body.compact .mo{ display:flex; flex-direction:column; min-height:0; padding:1.2vh 0.9vw 1vh; border-radius:1vh; }
+  body.compact .mo-h{ margin-bottom:0.4vh; }
+  body.compact .mo-h .nm{ font-size:3vh; white-space:nowrap; }
+  body.compact .mo-h .dy{ font-size:2vh; }
+  body.compact .mo-v .big{ font-size:6.4vh; }
+  body.compact .mo-v .unit{ font-size:2vh; }
+  body.compact .mo-v .dlt{ font-size:2vh; }
+  body.compact svg.mchart{ flex:1 1 auto; height:auto; min-height:0; margin:1vh 0 0.3vh; }
+  body.compact .mo-x{ font-size:1.8vh; margin:0; }
+  body.compact .mo-f{ font-size:2.2vh; gap:0.9vw; padding-top:0.7vh; margin-top:0.5vh; }
+  /* the areas, the day list and the standards footnote are reading, not
+     glancing: they belong on the page somebody opens, not on the wall */
+  body.compact .areas, body.compact .mo .more, body.compact .daytab, body.compact #note{ display:none; }
+  @media print{
+    .bar, .controls{ display:none; }
+    .gallery{ grid-template-columns:repeat(3, 1fr); gap:8px; }
+    .mo{ break-inside:avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="bar" data-page="months" data-sub="Months" data-tools="reset"></div>
+<main class="wrap">
+  <div class="controls">
+    <div class="ctl"><div class="ctl-h">Range</div>
+      <div class="seg" id="range"><button data-m="13" class="on">13 months</button><button data-m="25">2 years</button></div></div>
+    <div class="ctl"><div class="ctl-h">Measurement</div>
+      <div class="seg" id="meas">
+        <button data-k="pct" class="on">% of standard</button>
+        <button data-k="rate">Picks an hour</button>
+        <button data-k="picks">Total picks</button>
+        <button data-k="hours">Hours worked</button>
+      </div></div>
+    <div style="margin-left:auto" class="hint" id="stamp"></div>
+  </div>
+  <div class="tiles kpis" id="kpis"></div>
+  <div id="gallery" class="gallery"></div>
+  <div class="hint" id="note" style="margin-top:12px; line-height:1.6"></div>
+</main>
+<script src="/web/theme.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+let MONTHS = 13, MEAS = 'pct', REP = null, OPEN = {};
+/* the frame says when this is a quarter of a wall rather than a page */
+const COMPACT = new URLSearchParams(location.search).get('compact') === '1';
+if(COMPACT) document.body.classList.add('compact');
+/* How many cards can share one row and still be worth looking at. Below
+   about a sixth of the width a card is a coloured smudge with a number on
+   it, so the older months drop off the left rather than every month getting
+   thinner - the recent ones are the ones being asked about. */
+const COMPACT_MAX = 6;
+/* On a card a fifth of a quarter of a screen wide, "September 2026" wraps to
+   two lines and pushes the number off the bottom. The short form says the
+   same thing in the room it has. */
+const MON3 = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function shortMonth(key){
+  const p = String(key).split('-');
+  return (MON3[(parseInt(p[1], 10) || 1) - 1] || p[1]) + ' ' + p[0];
+}
+const cardLabel = m => COMPACT ? shortMonth(m.key) : m.label;
+const priorName = m => COMPACT ? shortMonth(m.key).split(' ')[0] : m.label.split(' ')[0];
+
+/* what each measurement is, so the card, the chart and the tiles all read
+   the same field rather than each deciding for itself */
+const MEASURES = {
+  pct:   { unit: 'of standard', sign: '%', day: d => d.pct,   mo: m => m.pct,   dp: 0, refLab: 'standard',
+           ref: () => 100 },
+  rate:  { unit: 'picks an hour', sign: '', day: d => d.rate,  mo: m => m.rate,  dp: 1, refLab: 'standard',
+           /* the blended standard: what this month's own mix of work should
+              have produced an hour, which moves with the mix and is the only
+              honest line to draw across a raw rate */
+           ref: m => (m.hours > 0 ? m.expected / m.hours : null) },
+  picks: { unit: 'picks', sign: '', day: d => d.picks, mo: m => m.picks, dp: 0, ref: () => null },
+  hours: { unit: 'hours worked', sign: '', day: d => d.hours, mo: m => m.hours, dp: 1, ref: () => null }
+};
+function fmt(v, dp){
+  if(v == null) return '--';
+  return dp ? v.toFixed(dp) : Math.round(v).toLocaleString();
+}
+/* Only the percentage carries a pass mark, so only the percentage is
+   coloured. A month with more picks in it is not a better month. */
+function tone(pct){ return pct == null ? '' : pct >= 100 ? 'good' : pct >= 90 ? 'warn' : 'bad'; }
+
+/* One month's days as bars on a shared scale. The scale is worked out
+   across every month on screen, so the cards can be read against each
+   other - which is the only reason to put them side by side. */
+function chart(m, top, ref){
+  const days = daysInMonth(m.key);
+  const M = MEASURES[MEAS];
+  const W = 300, H = 88, padB = 12;
+  const bw = W / days;
+  const y = v => H - padB - (Math.max(0, Math.min(top, v)) / top) * (H - padB - 4);
+  const byDay = {};
+  m.series.forEach(d => { byDay[+d.day.slice(8)] = d; });
+  let bars = '';
+  for(let i = 1; i <= days; i++){
+    const d = byDay[i];
+    if(!d) continue;
+    const v = M.day(d);
+    if(v == null) continue;
+    const yy = y(v), x = (i - 1) * bw;
+    const we = d.dow === 0 || d.dow === 6;
+    const col = MEAS === 'pct' ? (d.pct >= 100 ? 'var(--good)' : d.pct >= 90 ? 'var(--amber)' : 'var(--crit)') : 'var(--blue)';
+    bars += '<rect class="b' + (we ? ' we' : '') + '" x="' + (x + bw * 0.12).toFixed(2) + '" y="' + yy.toFixed(1) +
+      '" width="' + (bw * 0.76).toFixed(2) + '" height="' + (H - padB - yy).toFixed(1) + '" fill="' + col + '">' +
+      '<title>' + esc(d.day) + ': ' + fmt(v, M.dp) + M.unit + ', ' + d.picks.toLocaleString() + ' picks in ' + d.hours + ' h, ' + d.people + ' picking</title></rect>';
+  }
+  /* No text inside the chart: it is stretched to whatever width the card
+     ended up, which would stretch the lettering with it. The scale goes
+     underneath in ordinary HTML instead. */
+  let refLine = '';
+  if(ref != null && ref > 0 && ref <= top){
+    const ry = y(ref).toFixed(1);
+    refLine = '<line class="ref" x1="0" x2="' + W + '" y1="' + ry + '" y2="' + ry + '"></line>';
+  }
+  const axis = '<line x1="0" x2="' + W + '" y1="' + (H - padB) + '" y2="' + (H - padB) + '" stroke="var(--axis)" stroke-width="1"></line>';
+  const scale = '<div class="mo-x"><span>1</span>' +
+    (ref != null && ref > 0 && ref <= top ? '<span class="rf">' + esc(M.refLab) + ' ' + fmt(ref, M.dp) + M.sign + '</span>' : '<span></span>') +
+    '<span>' + days + '</span></div>';
+  return '<svg class="mchart" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="' +
+    esc(m.label + ' by day') + '">' + refLine + bars + axis + '</svg>' + scale;
+}
+function daysInMonth(key){
+  const p = key.split('-');
+  return new Date(+p[0], +p[1], 0).getDate();
+}
+
+/* The areas inside a month, on the gallery's own ceiling rather than each
+   bar's. Capping every bar at 100% made an area at 101 and an area at 180
+   the same picture, which is the opposite of what a breakdown is for. */
+function areaRows(m, ceiling){
+  return m.areas.slice(0, 5).map(a => {
+    const t = tone(a.pct);
+    return '<div class="ar" title="' + esc(a.area + ': ' + a.picks.toLocaleString() + ' picks in ' + a.hours + ' h = ' +
+        (a.rate == null ? '--' : a.rate) + ' an hour' + (a.target ? ', standard ' + a.target : '')) + '">' +
+      '<span class="an">' + esc(a.area) + '</span>' +
+      '<span class="ab"><i class="' + t + '" style="width:' + Math.max(2, Math.min(100, ((a.pct || 0) / ceiling) * 100)).toFixed(1) + '%"></i></span>' +
+      '<span class="ap ' + t + '">' + (a.pct == null ? '--' : a.pct + '%') + '</span></div>';
+  }).join('');
+}
+function dayTable(m){
+  return '<table class="daytab"><thead><tr><th>Day</th><th class="n">Picks</th><th class="n">Hours</th>' +
+    '<th class="n">/h</th><th class="n">%</th><th class="n">People</th></tr></thead><tbody>' +
+    m.series.map(d => '<tr class="' + (d.dow === 0 || d.dow === 6 ? 'we' : '') + '"><td>' + esc(d.day.slice(5)) + '</td>' +
+      '<td class="n">' + d.picks.toLocaleString() + '</td><td class="n">' + d.hours + '</td>' +
+      '<td class="n">' + (d.rate == null ? '--' : d.rate) + '</td>' +
+      '<td class="n"><b class="' + tone(d.pct) + '">' + (d.pct == null ? '--' : d.pct + '%') + '</b></td>' +
+      '<td class="n">' + d.people + '</td></tr>').join('') + '</tbody></table>';
+}
+
+function draw(){
+  const g = $('gallery');
+  if(!REP){ g.innerHTML = '<div class="empty">loading</div>'; return; }
+  let ms = REP.months || [];
+  if(COMPACT && ms.length > COMPACT_MAX) ms = ms.slice(-COMPACT_MAX);
+  if(!ms.length){
+    g.innerHTML = '<div class="empty"><b>No months on file yet</b>' +
+      'The gallery is built from the daily rollup. Run the one-time year backfill on the host PC ' +
+      '(Admin &gt; Backfill) and every month it finds appears here.</div>';
+    $('kpis').innerHTML = ''; $('note').textContent = '';
+    return;
+  }
+  const M = MEASURES[MEAS];
+  /* one scale for the whole gallery, with a little headroom so the tallest
+     bar is not flush against the top of its card */
+  let top = 0;
+  ms.forEach(m => m.series.forEach(d => { const v = M.day(d); if(v != null && v > top) top = v; }));
+  top = top > 0 ? top * 1.08 : 1;
+
+  /* a month with only a handful of days in it is drawn faded: it is a part
+     month, not a bad one, and the difference matters at a glance */
+  const typical = ms.map(m => m.days).sort((a, b) => a - b)[Math.floor(ms.length / 2)] || 1;
+  let areaTop = 100;
+  ms.forEach(m => m.areas.slice(0, 5).forEach(a => { if(a.pct != null && a.pct > areaTop) areaTop = a.pct; }));
+
+  g.innerHTML = ms.map((m, i) => {
+    const v = M.mo(m), prev = i > 0 ? M.mo(ms[i - 1]) : null;
+    const ref = typeof M.ref === 'function' ? M.ref(m) : M.ref;
+    const d = (v != null && prev != null && prev !== 0) ? (v - prev) : null;
+    const flat = d == null || Math.abs(d) < (M.dp ? 0.05 : 0.5);
+    const dCls = flat ? 'flat' : d > 0 ? 'good' : 'bad';
+    const prev1 = i > 0 ? esc(priorName(ms[i - 1])) : '';
+    const dTxt = d == null ? '' : flat ? ((COMPACT ? 'level, ' : 'level with ') + prev1)
+      : ((d > 0 ? '+' : '') + fmt(d, M.dp) + M.sign + ' on ' + prev1);
+    const open = !!OPEN[m.key];
+    return '<div class="mo' + (m.days < typical * 0.6 ? ' thin' : '') + '" data-mod="mo-' + esc(m.key) + '" data-k="' + esc(m.key) + '">' +
+      '<div class="mo-h"><span class="nm">' + esc(cardLabel(m)) + '</span>' +
+        '<span class="dy">' + m.days + ' day' + (m.days === 1 ? '' : 's') + '</span></div>' +
+      '<div class="mo-v"><span class="big ' + (MEAS === 'pct' ? tone(m.pct) : '') + '">' + fmt(v, M.dp) + M.sign + '</span>' +
+        '<span class="unit">' + esc(M.unit) + '</span>' +
+        '<span class="dlt ' + dCls + '">' + dTxt + '</span></div>' +
+      chart(m, top, ref) +
+      '<div class="mo-f"><span><b>' + m.picks.toLocaleString() + '</b> picks</span>' +
+        '<span><b>' + Math.round(m.hours).toLocaleString() + '</b> h</span>' +
+        '<span><b>' + m.people + '</b> people</span>' +
+        '<span><b>' + m.perDay.toLocaleString() + '</b> a day</span></div>' +
+      '<div class="areas">' + areaRows(m, areaTop) + '</div>' +
+      '<button class="more" data-more="' + esc(m.key) + '">' + (open ? 'hide the days' : 'every day') + '</button>' +
+      (open ? dayTable(m) : '') +
+      '</div>';
+  }).join('');
+  g.querySelectorAll('[data-more]').forEach(b => {
+    b.onclick = () => { const k = b.getAttribute('data-more'); OPEN[k] = !OPEN[k]; draw(); };
+  });
+
+  const t = REP.total;
+  $('kpis').innerHTML = [
+    ['% of standard', (t.pct == null ? '--' : t.pct + '%'), 'across ' + ms.length + ' month' + (ms.length === 1 ? '' : 's'), tone(t.pct)],
+    ['Picks', t.picks.toLocaleString(), t.days.toLocaleString() + ' days on file', ''],
+    ['Picks an hour', (t.rate == null ? '--' : t.rate), 'per picker, per hour worked', ''],
+    ['Hours worked', Math.round(t.hours).toLocaleString(), 'credited active time', ''],
+    ['People', (t.people == null ? '--' : t.people), 'anyone who confirmed a pick', '']
+  ].map(([lab, val, sub, cls], i) =>
+    '<div class="tile" data-mod="kpi-' + i + '"><div class="lab">' + lab + '</div><div class="val ' + cls + '">' + val + '</div>' +
+    '<div class="sub">' + sub + '</div></div>').join('');
+
+  $('stamp').textContent = REP.from + ' to ' + REP.to +
+    (COMPACT && (REP.months || []).length > ms.length ? ' · newest ' + ms.length + ' shown' : '') +
+    (REP.fromHost ? ' · from the host PC' : ' · ' + REP.historyDays + ' days on file');
+  $('note').innerHTML =
+    'Each bar is one day. The percentage is what those hours should have produced at each area&rsquo;s own standard, ' +
+    'against what they did produce - so a month heavy on cantilever and a month heavy on flow can be read against each other. ' +
+    'Weekends are the faded bars. A faded card is a part month rather than a poor one. ' +
+    'Standards in force: ' + esc(String(REP.targets || '').split('\n').join(', ')) + '.';
+}
+
+async function load(){
+  try{
+    const r = await fetch('/api/months?months=' + MONTHS, { cache: 'no-store' });
+    REP = await r.json();
+    if(REP.error) throw new Error(REP.error);
+  }catch(e){
+    $('gallery').innerHTML = '<div class="empty"><b>Could not load the months</b>' + esc(e.message) + '</div>';
+    return;
+  }
+  draw();
+}
+$('range').onclick = e => {
+  const b = e.target.closest('button'); if(!b) return;
+  $('range').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  MONTHS = +b.dataset.m; load();
+};
+$('meas').onclick = e => {
+  const b = e.target.closest('button'); if(!b) return;
+  $('meas').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  MEAS = b.dataset.k; draw();
+};
+load();
+setInterval(load, 300000);
+</script>
+</body>
+</html>

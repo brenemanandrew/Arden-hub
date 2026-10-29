@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Staging Lane Health - Ops</title>
+<link rel="stylesheet" href="/web/board2.css">
+<style>
+  .wrap{ max-width:1400px; margin:0 auto; padding:16px 22px 40px; }
+  .kpis{ grid-template-columns:repeat(6, 1fr); }
+  .kpis .tile .val{ font-size:40px; }
+  .cols{ display:grid; grid-template-columns:1fr 1.75fr; gap:14px; margin-top:14px; }
+  .stack{ display:flex; flex-direction:column; gap:14px; }
+  .card h2 .right{ margin-left:auto; }
+  .zbars{ display:grid; grid-template-columns:auto 1fr auto; gap:6px 10px; align-items:center; font-size:14px; }
+  .zbars .track{ height:14px; background:var(--blue-soft); border-radius:3px; overflow:hidden; }
+  .zbars .track i{ display:block; height:100%; background:var(--blue); border-radius:3px; }
+  .zbars .n{ font-variant-numeric: tabular-nums; color:var(--ink-2); }
+  #minilanes .lane{ min-height:70px; padding:6px; aspect-ratio:1 / 0.95; }
+  #minilanes .lrow{ align-items:start; } #minilanes .lane .bin{ font-size:17px; } #minilanes .lane .age{ font-size:14px; } #minilanes .lane.late.oldest .age{ font-size:20px; } #minilanes .lane .tag{ font-size:9px; }
+  #minilanes .lane .field .fv{ font-size:12px; padding:1px 4px; } #minilanes .lane .field .fl{ font-size:9px; } #minilanes .lane .openword{ font-size:16px; }
+  #minilanes .zone h3{ font-size:11px; } #minilanes .rlab b{ font-size:14px; } #minilanes .linerow{ grid-template-columns:40px 1fr; }
+  .stuck .row .why{ white-space:normal; }
+  #drawer{ display:none; position:fixed; top:0; right:0; bottom:0; width:440px; background:var(--tile); border-left:1px solid var(--ring); box-shadow:-8px 0 24px rgba(0,0,0,.15); padding:18px 20px; overflow:auto; z-index:20; }
+  #drawer.open{ display:block; }
+  #drawer h2{ font-size:18px; margin-bottom:10px; }
+  #drawer label{ display:block; font-size:13px; font-weight:700; color:var(--ink-2); margin-top:10px; }
+  #drawer input, #drawer textarea{ width:100%; font:inherit; padding:6px 8px; border:1px solid var(--axis); border-radius:4px; background:var(--surface); color:var(--ink); }
+  #drawer textarea{ min-height:64px; font-family:Consolas, monospace; font-size:12.5px; }
+  #drawer .hint{ font-size:12px; color:var(--muted); margin-top:3px; }
+  #drawer .row{ display:flex; gap:10px; margin-top:14px; }
+  .pickside .areas{ display:grid; grid-template-columns:auto 1fr repeat(4, auto); gap:4px 10px; font-size:14px; align-items:center; }
+  .pickside .empty-note{ line-height:1.45; }
+  .pickside .unavail{ background:var(--plane); border:1px dashed var(--axis); border-radius:6px; padding:12px; color:var(--ink-2); font-size:14px; }
+  /* a phone: everything in one column, the lane map wraps, the settings
+     drawer takes the whole screen. Tablets keep the two-column layout. */
+  /* the phone's own headline numbers exist at every width; only one set is
+     ever visible, and the width decides */
+  .phone-kpi{ display:none; }
+  @media (max-width:600px){
+    .wrap{ padding:10px 10px 30px; }
+    .desk-kpi{ display:none; }
+    .phone-kpi{ display:block; }
+    /* the pick side card and Reset layout belong to a desk - the phone
+       board never carried either, and a thumb cannot drag a module anyway */
+    [data-mod="pickside"], #resetLayout{ display:none !important; }
+    /* the two desk columns stop existing, so every card is one row of a
+       single list and can be put in the order a phone wants */
+    /* a grid item is min-content wide by default, and the pace chart has an
+       intrinsic width of 520 - which is how a phone got a sideways scroll */
+    .cols{ grid-template-columns:minmax(0, 1fr); }
+    .cols .card, .cols .chart{ min-width:0; }
+    .stack{ display:contents; }
+    /* the order the phone board has always had: where things are, then the
+       two lists you act on, then the map to find the lane, then the day.
+       The map is open now rather than hidden behind a summary - but it is
+       long, so it stays below the lists it would otherwise bury. */
+    [data-mod="zones"]{ order:1 } [data-mod="age"]{ order:2 } [data-mod="stuck"]{ order:3 }
+    [data-mod="map"]{ order:4 } [data-mod="pace"]{ order:5 } [data-mod="pickside"]{ order:6 }
+    .tiles.kpis{ grid-auto-flow:row; grid-template-columns:1fr 1fr; gap:8px; }
+    .kpis .tile .val{ font-size:28px; }
+    .cols{ gap:10px; }
+    .card{ padding:12px 12px 10px; }
+    #paceChart svg{ width:100%; height:auto; }
+    #minilanes .lrow{ grid-auto-flow:row; grid-template-columns:repeat(4, 1fr); }
+    #minilanes .lane{ aspect-ratio:auto; min-height:52px; }
+    #minilanes .lane .field, #minilanes .lane .tag{ display:none; }
+    #drawer{ width:100%; border-left:none; }
+    .pickside .areas{ font-size:12px; gap:4px 6px; }
+    table.tv{ font-size:12px; }
+    /* a wide table scrolls inside its own card rather than dragging the
+       whole page sideways, which is what a phone was doing */
+    #ageTable, #stuckBody, #paceTable{ overflow-x:auto; }
+  }
+</style>
+</head>
+<body>
+<div class="bar" data-page="ops" data-sub="Ops view" data-tools="reset,layout,mode" data-feed data-settings></div>
+<main class="wrap">
+  <div class="attention" id="attention" hidden></div>
+  <div class="tiles kpis" id="kpis"></div>
+  <div class="cols">
+    <div class="stack" id="stackL">
+      <div class="card" id="pace" data-mod="pace"><h2>Orders cleared per hour <span id="paceSub"></span><button class="btn small right" id="toggleTable">Table</button></h2><div id="paceChart" class="chart"></div><div id="paceTable" style="display:none"></div>
+        <div class="legend"><span class="t"><i></i>today</span><span class="y"><i></i>yesterday</span><span id="logNote" style="margin-left:auto;color:var(--muted)"></span></div></div>
+      <div class="card" id="stuck" data-mod="stuck"><h2>Exceptions <span>what a person has to go and fix</span></h2><div id="stuckBody"></div></div>
+      <div class="card" id="clearNext" data-mod="age"><h2>Clear next <span>oldest first</span></h2><div id="ageTable"></div></div>
+    </div>
+    <div class="stack" id="stackR">
+      <div class="card" data-mod="zones"><h2>Staging by zone</h2><div id="zones" class="zbars"></div></div>
+      <div class="card" id="map" data-mod="map"><h2>Lane map <span>live</span></h2><div id="minilanes"></div></div>
+      <div class="card pickside" data-mod="pickside"><h2>Pick side <span>warehouse task feed</span></h2><div id="pickSide"></div></div>
+    </div>
+  </div>
+</main>
+<div id="drawer">
+  <h2>Board settings</h2>
+  <label>Board title<input id="sTitle"></label>
+  <label>Yellow after (hours)<input id="sYellow" type="number" step="0.25" min="0.25"></label>
+  <label>Red after (hours)<input id="sRed" type="number" step="0.25" min="0.5"></label>
+  <label>"Late" after (hours)<input id="sLate" type="number" step="0.5" min="0.5"></label>
+  <label>Daily goal, orders cleared (0 = none)<input id="sGoal" type="number" min="0"></label>
+  <label>Shifts, one per line: name, start, end, days (1-5 Mon-Fri, 6 Sat, 0 Sun)<textarea id="sShifts"></textarea></label>
+  <label>Lane rows (comma separated)<div class="hint">Row 1</div><textarea id="sRow1"></textarea><div class="hint">Row 2</div><textarea id="sRow2"></textarea><div class="hint">Bottom</div><input id="sBottom"><div class="hint">Problem solve (hospital)</div><input id="sHosp"></label>
+  <label>Treat this date as today (test mode, blank = live)<input id="sAsOf" type="date"></label>
+  <div class="row"><button class="btn primary" id="sSave">Save for every screen</button><button class="btn" id="sClose">Close</button></div>
+  <div class="hint" id="sMsg" style="margin-top:8px"></div>
+</div>
+<script src="/web/theme.js"></script>
+<script src="/web/board2.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const H = window.SLH;
+let SETTINGS = null, showTable = false;
+let tileN = 0;
+/* The desk and the phone have never wanted the same headline numbers. The
+   phone board led with the oldest thing in staging, because that is what
+   the person holding it is walking towards, and folded the rate into the
+   first tile rather than spending a whole one on it. Both sets are drawn
+   and the width decides which is seen - no width test in here to get wrong
+   on a fold-out phone or a rotated tablet.
+
+   Phone tiles carry no data-mod on purpose: they are not draggable, and six
+   more modules would confuse a layout somebody has already arranged. */
+function tile(label, val, sub, subCls, meterPct, meterCls, cls){
+  const phone = cls === 'phone-kpi';
+  return '<div class="tile ' + (phone ? 'phone-kpi' : 'desk-kpi') + '"' + (phone ? '' : ' data-mod="tile-' + (tileN++) + '"') + '><div class="lab">' + label + '</div><div class="val">' + val + '</div><div class="sub ' + (subCls || '') + '">' + (sub || '&nbsp;') + '</div>' +
+    (meterPct == null ? '' : '<div class="meter ' + (meterCls || '') + '"><i style="width:' + Math.max(0, Math.min(100, meterPct)).toFixed(0) + '%"></i></div>') + '</div>';
+}
+window.renderBoard = function(m){
+  tileN = 0;
+  const s = m.summary, p = m.pace, f = H.feedState(m.feed);
+  $('title').innerHTML = H.esc(m.title).replace(/health/i, '<b>$&</b>');
+  $('feed').className = 'feed ' + f.cls; $('feedText').innerHTML = H.esc(f.text) + (m.feed.testMode ? ' <span class="test">TEST ' + H.esc(m.feed.testMode) + '</span>' : '');
+  const goalPct = p.goal ? p.ordersClearedToday / p.goal * 100 : null;
+  const lateH = Math.round(m.thresholds.lateMin / 60);
+  $('kpis').innerHTML =
+    tile('Orders cleared today', p.ordersClearedToday + (p.goal ? '<small> / ' + p.goal + '</small>' : ''), !p.ordersClearedToday ? 'no clears logged yet today' : p.projected != null ? ('on track for ' + p.projected + (p.onPace == null ? '' : p.onPace ? ', on pace' : ', behind')) : (p.ordersClearedYesterday + ' yesterday'), !p.ordersClearedToday || p.onPace == null ? '' : p.onPace ? 'good' : 'bad', goalPct, p.onPace === false && p.ordersClearedToday ? 'crit' : 'good') +
+    tile('Rate', p.ratePerHour + '<small> /h</small>', p.shift ? (p.shift.name + ' shift, ' + p.hoursLeft + ' h left') : 'no shift running now') +
+    tile('Median dwell', p.medianDwellMin == null ? '&ndash;' : Math.floor(p.medianDwellMin / 60) + ':' + String(p.medianDwellMin % 60).padStart(2, '0'), 'cleared today, hours in lane') +
+    tile('Ready to ship', s.ready, s.late ? s.late + ' past ' + Math.round(m.thresholds.lateMin / 60) + ' h' : 'none past ' + Math.round(m.thresholds.lateMin / 60) + ' h', s.late ? 'bad' : 'good') +
+    tile('Waiting on picks', s.waiting, s.unknown ? s.unknown + ' not on the order report' : (s.looseTotes + ' with a loose tote'), s.unknown ? 'bad' : '') +
+    tile('Occupancy', s.occupancyPct + '<small>%</small>', s.lanesUsed + ' of ' + s.lanesTotal + ' lanes', '', s.occupancyPct, s.occupancyPct >= 85 ? 'crit' : s.occupancyPct >= 65 ? 'warn' : '') +
+    /* ---- and the same six the phone board always showed ---- */
+    tile('Orders cleared today', p.ordersClearedToday + (p.goal ? '<small> / ' + p.goal + '</small>' : ''), p.shift ? (p.ratePerHour + '/h, ' + p.hoursLeft + ' h left') : 'no shift running now', p.onPace === false ? 'bad' : p.onPace ? 'good' : '', null, '', 'phone-kpi') +
+    tile('Ready to ship', s.ready, s.late ? s.late + ' past ' + lateH + ' h' : 'none past ' + lateH + ' h', s.late ? 'bad' : 'good', null, '', 'phone-kpi') +
+    tile('Waiting on picks', s.waiting, s.unknown ? s.unknown + ' not on the order report' : (s.looseTotes + ' with a loose tote'), s.unknown ? 'bad' : '', null, '', 'phone-kpi') +
+    tile('Occupancy', s.occupancyPct + '<small>%</small>', s.lanesUsed + ' of ' + s.lanesTotal + ' lanes', '', s.occupancyPct, s.occupancyPct >= 85 ? 'crit' : s.occupancyPct >= 65 ? 'warn' : '', 'phone-kpi') +
+    tile('Oldest in staging', s.oldest ? s.oldest.age : '&ndash;', s.oldest ? (s.oldest.lane + (s.oldest.ready ? ', ready to ship' : ', still owed a pick')) : 'nothing staged', s.oldest && s.oldest.ageMin >= m.thresholds.lateMin ? 'bad' : '', null, '', 'phone-kpi') +
+    tile('Median dwell', p.medianDwellMin == null ? '&ndash;' : Math.floor(p.medianDwellMin / 60) + ':' + String(p.medianDwellMin % 60).padStart(2, '0'), 'cleared today, hours in lane', '', null, '', 'phone-kpi');
+  H.drawAttention('attention', m);
+  /* arrived from the strip on another page: land on the card it named */
+  if(!window.__jumped){ window.__jumped = true; H.jumpToHash(); }
+  $('paceSub').textContent = p.shift ? p.shift.name + ' shift' : '';
+  $('paceChart').innerHTML = H.paceChart(p, { width: 520, height: 190 });
+  $('paceTable').innerHTML = H.paceTable(p);
+  $('logNote').textContent = p.logCoverageDays ? 'departure log covers ' + p.logCoverageDays + ' day' + (p.logCoverageDays === 1 ? '' : 's') : 'departure log is empty until the host watches totes leave';
+  $('stuckBody').innerHTML = H.stuckList(m.stuck, 40);
+  const used = m.lanes.filter(l => l.totes).sort((a, b) => b.ageMin - a.ageMin);
+  $('ageTable').innerHTML = used.length ? '<table class="tv"><thead><tr><th>Lane</th><th>Age</th><th>Orders</th><th class="n">Totes</th><th>Status</th></tr></thead><tbody>' +
+    used.map(l => '<tr><td><b>' + l.bin + '</b></td><td class="num" style="color:' + (l.band === 'late' ? 'var(--crit)' : l.band === 'aging' ? '#8a5a00' : 'inherit') + '"><b>' + l.age + '</b></td><td>' + H.esc(l.orders.map(o => o.doc).join(', ')) + (l.alsoIn.length ? ' <span style="color:var(--muted)">also in ' + l.alsoIn.join(', ') + '</span>' : '') + '</td><td class="n">' + l.totes + '</td><td>' + H.tagFor(l) + '</td></tr>').join('') + '</tbody></table>' : '<div class="empty-note">Nothing staged.</div>';
+  $('zones').innerHTML = m.zones.map(z => '<div><b>' + H.esc(z.label) + '</b></div><div class="track"><i style="width:' + (z.total ? z.used / z.total * 100 : 0).toFixed(0) + '%"></i></div><div class="n">' + z.used + ' / ' + z.total + (z.late ? ' &middot; <span style="color:var(--crit);font-weight:700">' + z.late + ' late</span>' : '') + '</div>').join('');
+  const byBin = {}; m.lanes.concat(m.hospital).forEach(l => { byBin[l.bin] = l; });
+  $('minilanes').innerHTML = H.laneLayout() === 'line' ? H.lineBlock(m, byBin, s.oldest ? s.oldest.lane : null) : m.zones.map(z => H.zoneBlock(z, byBin, s.oldest ? s.oldest.lane : null)).join('');
+  const ps = m.pickSide;
+  $('pickSide').innerHTML = ps.available
+    ? '<div class="areas"><b>Area</b><span></span><b class="num">Picks</b><b class="num" title="the area\'s combined output over the span it was worked">Through / h</b><b class="num" title="how many people confirmed a pick in this area">People</b><b class="num" title="the per-person standard from Pick standards">Standard</b>' +
+      ps.areas.map(a =>
+        '<span>' + H.esc(a.area) + '</span>' +
+        '<span class="meter" style="margin:0"><i style="width:' + (ps.confirmed ? a.confirmed / ps.confirmed * 100 : 0).toFixed(0) + '%"></i></span>' +
+        '<span class="num">' + a.confirmed + '</span>' +
+        '<span class="num">' + (a.ratePerHour == null ? '&ndash;' : a.ratePerHour) + '</span>' +
+        '<span class="num">' + (a.pickers || '&ndash;') + '</span>' +
+        '<span class="num">' + (a.target ? a.target + ' ea' : '&ndash;') + '</span>'
+      ).join('') + '</div>' +
+      '<div class="empty-note">' + ps.confirmed + ' confirmed today, ' + ps.open + ' open tasks. Through/h is the area\'s combined output over the span it was worked, so it rises with headcount and is not a per-person figure. Standards come from <a href="/pickers">Pick standards</a>; performance against them is on that page, where the rate is measured per person.</div>'
+    : '<div class="unavail"><b>Not available yet.</b> The warehouse task export has not produced a real file (' + H.esc(ps.reason || 'not loaded') + '). This card fills in with picks per area and rate per hour the moment it does. Nothing else on this page depends on it.</div>';
+  mods.apply();
+};
+window.renderOffline = function(){ $('feed').className = 'feed bad'; $('feedText').textContent = 'service not reachable'; };
+$('toggleTable').onclick = () => { showTable = !showTable; $('paceChart').style.display = showTable ? 'none' : ''; $('paceTable').style.display = showTable ? '' : 'none'; $('toggleTable').textContent = showTable ? 'Chart' : 'Table'; };
+
+/* settings drawer: merges into the shared settings object so the classic
+   board and both v2 pages stay in step */
+async function openSettings(){
+  try{ const r = await fetch('/api/settings', { cache: 'no-store' }); SETTINGS = (r.ok && await r.json()) || {}; }catch(e){ SETTINGS = {}; }
+  if(!SETTINGS || typeof SETTINGS !== 'object') SETTINGS = {};
+  const v2 = SETTINGS.v2 || {}, lanes = SETTINGS.lanes || {};
+  const m = H.state.model;
+  $('sTitle').value = v2.title || SETTINGS.title || 'Staging Lane Health';
+  $('sYellow').value = SETTINGS.yellowHr || 1; $('sRed').value = SETTINGS.redHr || 2; $('sLate').value = v2.lateHr || 3; $('sGoal').value = v2.goalOrders || 0;
+  $('sShifts').value = (Array.isArray(SETTINGS.shifts) && SETTINGS.shifts.length ? SETTINGS.shifts : [{ name: 'Day', start: '07:00', end: '15:30', days: [1, 2, 3, 4, 5] }]).map(s => [s.name, s.start, s.end, (s.days || []).join('')].join(', ')).join('\n');
+  const rows = m ? m.laneRows : [[], [], []];
+  $('sRow1').value = (lanes.row1 || rows[0]).join(', '); $('sRow2').value = (lanes.row2 || rows[1]).join(', '); $('sBottom').value = (lanes.bottom || rows[2]).join(', ');
+  $('sHosp').value = (lanes.hosp || (m ? m.hospital.map(l => l.bin) : [])).join(', ');
+  $('sAsOf').value = SETTINGS.asOfDate || '';
+  $('sMsg').textContent = ''; $('drawer').classList.add('open');
+}
+$('openSettings').onclick = e => { e.preventDefault(); openSettings(); };
+$('sClose').onclick = () => $('drawer').classList.remove('open');
+$('sSave').onclick = async () => {
+  const list = v => v.split(/[,\n]/).map(x => x.trim().toUpperCase()).filter(Boolean);
+  const shifts = $('sShifts').value.split('\n').map(l => l.split(',').map(x => x.trim())).filter(p => p.length >= 3).map(p => ({ name: p[0], start: p[1], end: p[2], days: (p[3] || '12345').replace(/[^0-6]/g, '').split('').map(Number) }));
+  const next = Object.assign({}, SETTINGS, {
+    title: $('sTitle').value.trim() || 'Staging Lane Health', yellowHr: +$('sYellow').value || 1, redHr: +$('sRed').value || 2, shifts,
+    lanes: { row1: list($('sRow1').value), row2: list($('sRow2').value), bottom: list($('sBottom').value), hosp: list($('sHosp').value) },
+    asOfDate: $('sAsOf').value || '',
+    v2: Object.assign({}, SETTINGS.v2 || {}, { title: $('sTitle').value.trim(), lateHr: +$('sLate').value || 3, goalOrders: Math.max(0, +$('sGoal').value || 0) })
+  });
+  try{
+    const r = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next) });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    $('sMsg').textContent = 'Saved. Every screen updates within a few seconds.'; H.load();
+  }catch(e){ $('sMsg').textContent = 'Not saved: ' + e.message; }
+};
+H.initModeBtn();
+H.initLayoutBtn();
+const mods = H.initModules('ops', [['kpis'], ['stackL', 'stackR']]);
+H.connect();
+</script>
+</body>
+</html>

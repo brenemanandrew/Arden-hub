@@ -1,0 +1,11 @@
+{
+  "name": "arden-pack",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pack process board for the Arden DC: what the pack stations are doing, who is packing, and what is going out the door.",
+  "main": "server/main.js",
+  "scripts": {
+    "start": "node server/main.js"
+  },
+  "engines": { "node": ">=18" }
+}

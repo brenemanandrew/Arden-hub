@@ -4,116 +4,45 @@
     "subtitle": "Hubbell Arden Distribution Center",
     "intervalSeconds": 60
   },
+  "links": {
+    "overtime": "https://ardenot.fly.dev/",
+    "ideas": "https://hubbellideaboard.fly.dev/",
+    "ops": ""
+  },
   "dashboards": [
     {
+      "id": "stage",
+      "name": "Staging Lane Health (module)",
+      "blurb": "Lanes, orders and the picker report, fed by the SAP PC's pushes.",
+      "url": "/stage/tv",
+      "group": "In this app",
+      "health": {
+        "url": "http://127.0.0.1:8481/api/board",
+        "expect": { "status": [200] },
+        "fields": [
+          { "label": "Exports updated", "path": "feed.updated", "kind": "time", "staleMin": 20 },
+          { "label": "Push stale", "path": "feed.pushStale", "kind": "bool", "want": false },
+          { "label": "Lanes in use", "path": "summary.lanesUsed", "kind": "count" },
+          { "label": "Orders late", "path": "summary.late", "kind": "count" },
+          { "label": "Task export", "path": "feed.wh", "kind": "text" }
+        ]
+      }
+    },
+    {
       "id": "pack",
-      "name": "Pack",
-      "blurb": "Pack board: orders, handling units and open deliveries from SAP.",
-      "url": "https://ardenpack.fly.dev/",
-      "group": "Floor boards",
+      "name": "Arden Pack (module)",
+      "blurb": "Benches, packers and what is going out, from the same exports.",
+      "url": "/pack/pack",
+      "group": "In this app",
       "health": {
-        "url": "https://ardenpack.fly.dev/api/health",
-        "expect": {
-          "status": [
-            200
-          ],
-          "json": {
-            "ok": true
-          }
-        },
+        "url": "http://127.0.0.1:8482/api/health",
+        "expect": { "status": [200], "json": { "ok": true } },
         "fields": [
-          {
-            "label": "Warehouse tasks",
-            "path": "feed.wh.rows",
-            "kind": "count"
-          },
-          {
-            "label": "Tasks read",
-            "path": "feed.wh.readAt",
-            "kind": "time",
-            "staleMin": 30
-          },
-          {
-            "label": "Orders",
-            "path": "feed.orders.rows",
-            "kind": "count"
-          },
-          {
-            "label": "Orders read",
-            "path": "feed.orders.readAt",
-            "kind": "time",
-            "staleMin": 30
-          },
-          {
-            "label": "Handling units",
-            "path": "feed.stage.rows",
-            "kind": "count"
-          },
-          {
-            "label": "HU feed",
-            "path": "feed.stage.status",
-            "kind": "text"
-          }
-        ]
-      }
-    },
-    {
-      "id": "pick",
-      "name": "Pick",
-      "blurb": "Pickers page of Staging Lane Health: rates against standard, trend and activity.",
-      "url": "https://staging-lane-health.fly.dev/pickers",
-      "group": "Floor boards",
-      "health": {
-        "url": "https://staging-lane-health.fly.dev/api/health",
-        "expect": {
-          "status": [
-            200
-          ],
-          "json": {
-            "ok": true
-          }
-        },
-        "fields": [
-          {
-            "label": "Mode",
-            "path": "mode",
-            "kind": "text"
-          },
-          {
-            "label": "Build",
-            "path": "v",
-            "kind": "count"
-          }
-        ]
-      }
-    },
-    {
-      "id": "staging",
-      "name": "Staging Lane Health",
-      "blurb": "Floor TV and ops views of the staging lanes, pushed from the SAP PC.",
-      "url": "https://staging-lane-health.fly.dev/",
-      "group": "Floor boards",
-      "health": {
-        "url": "https://staging-lane-health.fly.dev/api/health",
-        "expect": {
-          "status": [
-            200
-          ],
-          "json": {
-            "ok": true
-          }
-        },
-        "fields": [
-          {
-            "label": "Mode",
-            "path": "mode",
-            "kind": "text"
-          },
-          {
-            "label": "Build",
-            "path": "v",
-            "kind": "count"
-          }
+          { "label": "Warehouse tasks", "path": "feed.wh.rows", "kind": "count" },
+          { "label": "Tasks read", "path": "feed.wh.readAt", "kind": "time", "staleMin": 30 },
+          { "label": "Orders", "path": "feed.orders.rows", "kind": "count" },
+          { "label": "Orders read", "path": "feed.orders.readAt", "kind": "time", "staleMin": 30 },
+          { "label": "Handling units", "path": "feed.stage.rows", "kind": "count" }
         ]
       }
     },
@@ -122,15 +51,10 @@
       "name": "Weekend Overtime",
       "blurb": "Sign-up kiosk, the weighted draw and the posting sheet.",
       "url": "https://ardenot.fly.dev/",
-      "group": "People",
+      "group": "Other apps",
       "health": {
         "url": "https://ardenot.fly.dev/health",
-        "expect": {
-          "status": [
-            200
-          ],
-          "text": "ok"
-        }
+        "expect": { "status": [200], "text": "ok" }
       }
     },
     {
@@ -138,23 +62,34 @@
       "name": "CI Idea Board",
       "blurb": "Idea cards from the floor, by QR code.",
       "url": "https://hubbellideaboard.fly.dev/",
-      "group": "People",
+      "group": "Other apps",
       "health": {
         "url": "https://hubbellideaboard.fly.dev/",
-        "expect": {
-          "status": [
-            200
-          ]
-        },
+        "expect": { "status": [200] },
         "slowMs": 6000
       }
     },
     {
-      "id": "ops-site",
-      "name": "Operations site",
-      "blurb": "SharePoint home: Standard Work, 5S, news. Add its address in dashboards.json.",
-      "url": "",
-      "group": "Links"
+      "id": "old-staging",
+      "name": "Old Staging Lane cloud copy",
+      "blurb": "staging-lane-health.fly.dev, until the SAP PC is pointed here and it is switched off.",
+      "url": "https://staging-lane-health.fly.dev/",
+      "group": "Other apps",
+      "health": {
+        "url": "https://staging-lane-health.fly.dev/api/health",
+        "expect": { "status": [200], "json": { "ok": true } }
+      }
+    },
+    {
+      "id": "old-pack",
+      "name": "Old Arden Pack cloud copy",
+      "blurb": "ardenpack.fly.dev, until the SAP PC is pointed here and it is switched off.",
+      "url": "https://ardenpack.fly.dev/",
+      "group": "Other apps",
+      "health": {
+        "url": "https://ardenpack.fly.dev/api/health",
+        "expect": { "status": [200], "json": { "ok": true } }
+      }
     }
   ]
 }

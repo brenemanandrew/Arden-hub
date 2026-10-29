@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Staging Lane Health - Quad</title>
+<link rel="stylesheet" href="/web/board2.css">
+<style>
+  /* Four views on one wall panel.
+
+     Built the way the classic board is: a fixed 1920x1080 stage, scaled to
+     whatever screen it lands on and centred, so a 65 inch panel, a monitor
+     and a laptop all show the same thing at different sizes rather than four
+     different layouts.
+
+     One header across the top and a hairline between the quarters. Nothing
+     else: no title bar per quarter, no borders, no padding around the grid.
+     Each quarter is an ordinary page of this app, cropped just below its own
+     header and scaled to fit - which means every quarter keeps working when
+     the page inside it changes, and a view added to the app is a line in the
+     list below rather than a rewrite here.
+
+     Two of the choices are built for this and nothing else (/panel): a
+     quarter of a 1080p screen is 958 x 510 real pixels seen from across a
+     floor, and an ordinary desk page shrunk into that is a picture of
+     information rather than information. */
+  html,body{ height:100%; margin:0; overflow:hidden; background:#000; }
+  #stage{ position:absolute; left:0; top:0; width:1920px; height:1080px; transform-origin:top left;
+          background:var(--axis); display:flex; flex-direction:column; }
+
+  /* ---- the one header ---- */
+  #head{ flex:0 0 56px; display:flex; align-items:center; gap:14px; padding:0 16px;
+         background:#0b0b0b; color:#fff; box-sizing:border-box; }
+  #head .logo{ height:30px; width:auto; display:block; }
+  #head .ttl{ font:800 21px/1 "Segoe UI", system-ui, sans-serif; letter-spacing:.02em; white-space:nowrap; }
+  #head .ttl b{ color:var(--amber); font-weight:800; }
+  #head .grow{ flex:1 1 auto; }
+  #head .clock{ font:700 24px/1 "Segoe UI", system-ui, sans-serif; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  /* touch targets: this is a panel people prod with a finger, so nothing here
+     is smaller than a fingertip */
+  #head select, #head button{ font:700 15px/1 "Segoe UI", system-ui, sans-serif; height:40px; min-width:44px;
+    background:#1e1e1e; color:#fff; border:1px solid #3a3a3a; border-radius:7px; padding:0 10px; cursor:pointer; }
+  #head select:hover, #head button:hover{ border-color:var(--amber); }
+  #head button.on{ background:var(--amber); color:#000; border-color:var(--amber); }
+  .pick{ display:flex; align-items:center; gap:6px; }
+  .pick i{ font-style:normal; font:800 12px/1 "Segoe UI", system-ui, sans-serif; letter-spacing:.08em;
+           color:#8a9299; width:20px; text-align:right; }
+  #focus{ display:flex; gap:4px; }
+
+  /* ---- the grid: dividers are the gaps, nothing is drawn ---- */
+  #grid{ flex:1 1 auto; display:grid; gap:4px; background:var(--axis);
+         grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; }
+  #grid.focus-one{ grid-template-columns:1fr; grid-template-rows:1fr; }
+  .cell{ position:relative; overflow:hidden; background:var(--surface); }
+  .cell.hide{ display:none; }
+  .scale{ position:absolute; left:0; top:0; transform-origin:top left; }
+  .clip{ position:relative; overflow:hidden; }
+  .clip iframe{ display:block; border:0; background:transparent; }
+  /* a quarter with nothing chosen */
+  .mode{ font:800 11px "Segoe UI", system-ui, sans-serif; letter-spacing:.12em; text-transform:uppercase;
+         padding:3px 8px; border-radius:999px; border:1px solid var(--hair); color:var(--muted); white-space:nowrap; }
+  .mode:empty{ display:none; }
+  .mode.viewer{ border-color:#FFC000; color:#FFC000; }
+  .cell.blank{ display:flex; align-items:center; justify-content:center; color:var(--muted);
+               font:600 20px "Segoe UI", system-ui, sans-serif; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="head">
+    <img class="logo" src="/web/logo.png" alt="Hubbell">
+    <div class="ttl">STAGING LANE <b>HEALTH</b></div>
+    <span class="mode" id="modePill"></span>
+    <div class="pick"><i>TL</i><select id="s0"></select></div>
+    <div class="pick"><i>TR</i><select id="s1"></select></div>
+    <div class="pick"><i>BL</i><select id="s2"></select></div>
+    <div class="pick"><i>BR</i><select id="s3"></select></div>
+    <div class="grow"></div>
+    <div id="focus">
+      <button data-f="-1" class="on" title="Show all four">Quad</button>
+      <button data-f="0" title="Show the top left on its own">TL</button>
+      <button data-f="1" title="Show the top right on its own">TR</button>
+      <button data-f="2" title="Show the bottom left on its own">BL</button>
+      <button data-f="3" title="Show the bottom right on its own">BR</button>
+    </div>
+    <button id="reload" title="Reload all four">&#10227;</button>
+    <button id="full" title="Full screen">&#9974;</button>
+    <div class="clock" id="clock"></div>
+  </div>
+  <div id="grid">
+    <div class="cell" id="c0"></div>
+    <div class="cell" id="c1"></div>
+    <div class="cell" id="c2"></div>
+    <div class="cell" id="c3"></div>
+  </div>
+</div>
+<script>
+(function(){
+const $ = id => document.getElementById(id);
+const W = 1920, H = 1080, HEAD = 56, GAP = 4;
+/* host or viewer, said once beside the title, same as every other page */
+fetch('/api/status', { cache: 'no-store' }).then(r => r.json()).then(s => {
+  const p = $('modePill'), cloud = !!(s && s.server && s.server.mode === 'cloud');
+  if(p){ p.textContent = cloud ? 'Viewer' : 'Host'; p.classList.toggle('viewer', cloud); }
+}).catch(() => {});
+
+/* Every view a quarter can hold.
+
+   `w` is the only size given: the width the page is laid out at before being
+   scaled into its quarter, chosen for how big the type comes out. The height
+   is not given, because it is not free - it is whatever makes the page the
+   same shape as the quarter it has to fill. Naming both used to letterbox
+   every document page: 1500x980 is a different shape from 958x510, so a
+   quarter of Ops or Months sat in a grey box with a hundred pixels of dead
+   space down one side. Now the page is handed a viewport of its quarter's
+   own shape and fills it exactly, at any quarter size, in focus or in quad.
+
+   `crop` names the page's own header, measured at load and cut off, so the
+   quad has one header rather than five. */
+const HDR = 'header, .bar';    // every page in this app names its own header one of these
+const PANELS = {
+  board:    { lab: 'Classic board',   src: '/board?frame=1',               w: 1920, crop: HDR },
+  /* The floor board lays out for whatever width it is given, so it is given
+     1400 rather than 1920: the quarter then scales it by 0.68 instead of
+     0.50 and every lane tile comes out half again as big, with the clear-next
+     and exceptions column still beside it. The classic board above it is
+     different - it draws on a fixed 1920x1080 stage and scales itself, so
+     narrowing the frame would only move where the shrinking happens. */
+  lanes:    { lab: 'Staging lanes',   src: '/tv',                          w: 1400, crop: HDR },
+  prod:     { lab: 'Productivity',    src: '/panel?p=productivity',        w: 958,  crop: null },
+  pace:     { lab: 'Pace by hour',    src: '/panel?p=pace',                w: 958,  crop: null },
+  overview: { lab: 'Board overview',  src: '/board?frame=1#view=overview', w: 1920, crop: HDR },
+  ops:      { lab: 'Ops view',        src: '/ops',                         w: 1320, crop: HDR },
+  pickers:  { lab: 'Picker report',   src: '/pickers',                     w: 1500, crop: HDR },
+  months:   { lab: 'Months',          src: '/months?compact=1',            w: 1500, crop: HDR },
+  people:   { lab: 'People',          src: '/people',                      w: 1500, crop: HDR },
+  none:     { lab: 'Nothing',         src: null }
+};
+/* What the panel shows before anyone chooses. The classic board and its
+   "overview" view render the same screen - the board's home IS the overview -
+   so the second quarter is the staging line itself, which is the thing the
+   board summarises rather than a second copy of the summary. Both are in the
+   list; two taps swaps them. */
+const DEFAULTS = ['board', 'lanes', 'prod', 'pace'];
+const KEY = 'slh-quad';
+
+let choice = DEFAULTS.slice(), focus = -1;
+try{
+  const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+  if(saved && Array.isArray(saved.choice) && saved.choice.length === 4){
+    choice = saved.choice.map((c, i) => PANELS[c] ? c : DEFAULTS[i]);
+  }
+}catch(e){}
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify({ choice })); }catch(e){} }
+
+/* ---- the stage, scaled to whatever this screen really is ---- */
+let fw = 0, fh = 0;
+function fit(){
+  fw = innerWidth; fh = innerHeight;
+  const k = Math.min(innerWidth / W, innerHeight / H);
+  const st = $('stage');
+  st.style.transform = 'translate(' + Math.max(0, (innerWidth - W * k) / 2) + 'px,' +
+    Math.max(0, (innerHeight - H * k) / 2) + 'px) scale(' + k + ')';
+}
+addEventListener('resize', fit);
+addEventListener('orientationchange', fit);
+/* a panel going full screen does not always say so with a resize */
+setInterval(() => { if(innerWidth !== fw || innerHeight !== fh) fit(); }, 1000);
+fit();
+
+/* ---- one quarter ---- */
+function cellBox(){
+  const one = focus >= 0;
+  return {
+    w: one ? W : (W - GAP) / 2,
+    h: one ? (H - HEAD) : (H - HEAD - GAP) / 2
+  };
+}
+/* Lay the iframe out inside its quarter.
+
+   One scale factor, taken from the width alone: k = quarter width / layout
+   width. The height the page is given is then whatever fills the rest of the
+   quarter at that same k, so the result is an exact fit with nothing left
+   over and nothing to centre. Rounded up rather than down, and the quarter
+   clips, so a fractional scale can never leave a grey hairline along an edge.
+
+   The header is cut by its bottom edge rather than its height, because the
+   classic board draws itself on a stage it centres inside the window: its
+   header is not always at y=0, and cutting a height off the top would take
+   the wrong strip. A bottom edge is right either way.
+
+   Called again after load, because the header cannot be measured until it
+   exists, and again on focus, because the quarter changed shape. */
+function place(i){
+  const cell = $('c' + i), p = PANELS[choice[i]];
+  if(!p || !p.src) return;
+  const sc = cell.querySelector('.scale'), clip = cell.querySelector('.clip'), fr = cell.querySelector('iframe');
+  if(!sc || !clip || !fr) return;
+  let crop = 0;
+  if(p.crop){
+    try{
+      const d = fr.contentDocument;
+      const el = d && d.querySelector(p.crop);
+      if(el) crop = Math.max(0, Math.round(el.getBoundingClientRect().bottom));
+    }catch(e){ crop = 0; }
+  }
+  const box = cellBox();
+  const k = box.w / p.w;
+  const vh = Math.max(50, Math.ceil(box.h / k));   // the height that fills the rest of the quarter
+  clip.style.width = p.w + 'px';
+  clip.style.height = vh + 'px';
+  fr.style.width = p.w + 'px';
+  fr.style.height = (vh + crop) + 'px';
+  fr.style.marginTop = (-crop) + 'px';
+  sc.style.transform = 'scale(' + k.toFixed(5) + ')';
+}
+
+function build(i){
+  const cell = $('c' + i), p = PANELS[choice[i]];
+  cell.classList.remove('blank');
+  if(!p || !p.src){ cell.classList.add('blank'); cell.innerHTML = 'Nothing here'; return; }
+  cell.innerHTML = '<div class="scale"><div class="clip"><iframe title="' + p.lab + '" scrolling="no"></iframe></div></div>';
+  const fr = cell.querySelector('iframe');
+  /* the hash has to go on last or the board reads it before it is framed */
+  fr.addEventListener('load', () => {
+    place(i);
+    /* a document page can settle after its first paint (fonts, a fetch), so
+       measure again rather than trusting the first frame */
+    setTimeout(() => place(i), 600);
+  });
+  fr.src = p.src;
+}
+function buildAll(){ for(let i = 0; i < 4; i++) build(i); }
+function placeAll(){ for(let i = 0; i < 4; i++) place(i); }
+
+/* ---- the header controls ---- */
+const OPTS = Object.keys(PANELS);
+for(let i = 0; i < 4; i++){
+  const sel = $('s' + i);
+  sel.innerHTML = OPTS.map(k => '<option value="' + k + '">' + PANELS[k].lab + '</option>').join('');
+  sel.value = choice[i];
+  sel.onchange = () => { choice[i] = sel.value; save(); build(i); };
+}
+$('focus').onclick = e => {
+  const b = e.target.closest('button');
+  if(!b) return;
+  focus = +b.dataset.f;
+  $('focus').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  $('grid').classList.toggle('focus-one', focus >= 0);
+  for(let i = 0; i < 4; i++) $('c' + i).classList.toggle('hide', focus >= 0 && focus !== i);
+  placeAll();
+};
+$('reload').onclick = () => buildAll();
+$('full').onclick = () => {
+  const el = document.documentElement;
+  try{
+    if(document.fullscreenElement) document.exitFullscreen();
+    else if(el.requestFullscreen) el.requestFullscreen({ navigationUI: 'hide' });
+    else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  }catch(e){}
+};
+
+function clock(){
+  $('clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+clock(); setInterval(clock, 15000);
+
+/* a wall panel should not go to sleep in the middle of a shift */
+let lock = null;
+async function wake(){
+  try{
+    if(!navigator.wakeLock || lock) return;
+    lock = await navigator.wakeLock.request('screen');
+    lock.addEventListener('release', () => { lock = null; });
+  }catch(e){ lock = null; }
+}
+wake();
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') wake(); });
+
+buildAll();
+})();
+</script>
+</body>
+</html>

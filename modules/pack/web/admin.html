@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arden Pack - Settings</title>
+<link rel="stylesheet" href="/web/board2.css">
+<style>
+  /* a label beside its field, which is all a settings form is */
+  .kv{ display:grid; grid-template-columns:max-content minmax(0, 1fr); gap:10px 16px; align-items:start; margin:4px 0 2px; }
+  .kv > label{ font-size:13px; font-weight:700; padding-top:7px; }
+  .kv > div{ min-width:0; }
+  .kv input, .kv textarea{ font:inherit; font-size:13px; width:100%; box-sizing:border-box; padding:6px 9px;
+      border:1px solid var(--axis); border-radius:5px; background:var(--surface); color:var(--ink); }
+  .kv input.sm{ width:120px; }
+  .kv textarea{ min-height:84px; font-family:Consolas, monospace; white-space:pre; overflow-x:auto; }
+  .kv .sub{ font-size:12px; color:var(--muted); margin-top:3px; line-height:1.45; }
+  .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+  /* the three exports, and whether this copy is holding them */
+  .files{ display:grid; grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:10px; margin-top:4px; }
+  .f{ border:1px solid var(--ring); border-radius:7px; padding:8px 10px; background:var(--surface); }
+  .f .n{ font-weight:800; font-size:13px; }
+  .f .s{ font-size:12px; color:var(--ink-2); margin-top:2px; }
+  .f.bad{ border-color:var(--crit); }
+  /* waiting on a file nobody has dropped: quieter than an error, because
+     it is not one */
+  .f.waiting{ border-style:dashed; }
+  .f.waiting .s{ color:var(--muted); }
+  .f.bad .s{ color:var(--crit); font-weight:700; }
+</style>
+</head>
+<body>
+<div class="bar" data-page="admin" data-sub="Settings"></div>
+
+<main class="wrap">
+  <div class="tabs">
+    <button data-pane="settings" class="on">Settings</button>
+    <button data-pane="cols">Columns</button>
+    <button data-pane="exports">Every export</button>
+  </div>
+
+  <div class="pane on" id="pane-settings">
+    <h2 class="ch">What this copy is reading <span id="whereMsg"></span></h2>
+    <div class="box">
+      <p class="hint" style="line-height:1.5">
+        The exports come from the folder Staging Lane Health writes them into. Nothing here drives SAP - one session
+        on the host, one driver, two readers - so if an export stops arriving the answer is on that service, not this
+        one. The copy on the internet has no folder of its own: what it holds is what the PC beside SAP sent it.
+      </p>
+      <div class="kvb hint" id="where"></div>
+      <div class="files" id="files"></div>
+      <div class="row"><button class="btn" id="bReread">Read the folder again</button>
+        <span class="hint" id="rereadMsg"></span></div>
+    </div>
+
+    <h2 class="ch">The rules the board counts by</h2>
+    <div class="box">
+      <p class="hint" style="line-height:1.5">
+        Everything here has a working default, and the board comes up having been told nothing. Saving takes effect
+        on the next drawing of the page - the daily record is rebuilt from the export that is loaded, so a change
+        shows at once rather than from tomorrow.
+      </p>
+      <div class="kv">
+        <label for="dayHours">A day is worth</label>
+        <div><input class="sm" id="dayHours" type="number" step="0.25" min="0.25" max="24">
+          <div class="sub">Hours. The most one person's day can be worth however long their scans run - a paid shift
+            with the breaks taken out. 6.5 is a shift of 8 and a half with an hour of breaks and the changeover.</div></div>
+
+        <label for="windowMin">A gap over</label>
+        <div><input class="sm" id="windowMin" type="number" step="5" min="1" max="240">
+          <div class="sub">Minutes. Longer than this between one scan and the next and they were doing something
+            else, so the gap is not paid for. It caps what a single gap can add, which is what keeps one person who
+            scanned twice in a day from being credited with the whole day.</div></div>
+
+        <label for="hideBins">Not really benches</label>
+        <div><input id="hideBins" type="text" spellcheck="false">
+          <div class="sub">Bins that look like pack benches and are not - BOL and the hidden pack area. They take
+            work in and never ship it out, so they sat at the bottom of the board flagged as filling up for ever.
+            Separated by commas.</div></div>
+
+        <label for="lineKey">A delivery line is</label>
+        <div><input id="lineKey" type="text" spellcheck="false" placeholder="blank - work it out from the export">
+          <div class="sub">The export columns that together identify one line, separated by commas. <b>Leave it
+            blank</b> and the model works it out from the file, which it does well. The <b>Columns</b> tab reads the
+            export and says what it could be, and sets it for you.</div></div>
+
+        <label for="schedule">The working week</label>
+        <div><textarea id="schedule" spellcheck="false" placeholder="blank - the built-in week"></textarea>
+          <div class="sub">One shift a line: <code>Mon-Fri 1st 07:00-15:30 breaks 09:30=15, 11:30=30, 13:30=15</code>
+            - days, a name, start and end, then breaks as a clock time = minutes. An end earlier than the start runs
+            past midnight. Blank uses the built-in week shown below it; the single word <code>none</code> means no
+            schedule at all, every hour counting and one shift.</div></div>
+      </div>
+      <div class="row">
+        <button class="btn primary" id="bSave">Save</button>
+        <button class="btn" id="bRevert">Undo my changes</button>
+        <span class="hint" id="saveMsg"></span>
+      </div>
+      <p class="hint" id="schedShow" style="margin-top:10px"></p>
+    </div>
+  </div>
+
+  <div class="pane" id="pane-exports">
+    <h2 class="ch">What each export carries</h2>
+    <div class="box">
+      <p class="hint" style="line-height:1.5">
+        Every column of whichever export you pick, with how often it is filled, how many different values
+        it has, and what a few of them look like. The <b>Columns</b> tab answers a question about activities
+        and only reads the task export; this one is flatter and reads any of the three.
+      </p>
+      <p class="hint" style="line-height:1.5">
+        It also says whether anything in here is <b>money</b> - a column named like a value, or one whose
+        numbers are decimals with a real spread to them. Worth knowing because EWM does not price anything:
+        it records quantities, weights, volumes, bins and handling units, and value lives on the sales and
+        billing side. A value can only turn up here by riding along unnoticed.
+      </p>
+      <div class="row" style="margin-top:4px">
+        <select class="dd" id="expKind">
+          <option value="wh">warehouse task</option>
+          <option value="orders" selected>orders</option>
+          <option value="stage">handling unit staging</option>
+          <option value="sapdel">open delivery value (SAP)</option>
+          <option value="pgi">shipped delivery value (PGI)</option>
+        </select>
+        <button class="btn primary" id="bExp">Read it</button>
+        <span class="hint" id="expMsg"></span>
+      </div>
+      <div id="expOut"></div>
+    </div>
+  </div>
+
+  <div class="pane" id="pane-cols">
+    <h2 class="ch">What the task export carries</h2>
+    <div class="box">
+      <p class="hint" style="line-height:1.5">
+        Every column in the warehouse task export this copy is holding, counted against each activity.
+        <b>ZLOD</b> is a handling unit going to LOADING - the row a packer makes. <b>PICK</b> is a pick. A column
+        can be full on one and empty on the other, which is the whole question behind measuring packers in lines
+        rather than units: an HU-level task often leaves the item-level fields blank.
+      </p>
+      <p class="hint" style="line-height:1.5">
+        <b>Filled</b> is how often the column has anything in it. <b>Values</b> is how many different things it says.
+        <b>Rows each</b> is rows per value: <b>1</b> names the row (a task number, a handling unit),
+        <b>more than 1</b> groups rows (a delivery, an order), <b>0</b> is empty.
+      </p>
+      <div class="row" style="margin-top:4px">
+        <button class="btn primary" id="bCols">Read the export</button>
+        <button class="btn" id="bBridge" title="Whether the handling unit export can link a shipped carton to a delivery">Can the HU export give us lines?</button>
+        <span class="hint" id="colsMsg"></span>
+      </div>
+      <div id="bridgeOut"></div>
+      <div id="colsOut"></div>
+    </div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+<script src="/web/theme.js"></script>
+<script src="/web/admin.js"></script>
+</body>
+</html>

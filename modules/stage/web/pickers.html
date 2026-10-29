@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Staging Lane Health - Picker performance</title>
+<link rel="stylesheet" href="/web/board2.css">
+<style>
+  /* Area colours: the validated categorical order, with red left out because
+     red means "behind target" everywhere else on this page. */
+  :root{
+    --a1:#2a78d6; --a2:#eb6834; --a3:#1baf7a; --a4:#eda100;
+    --a5:#e87ba4; --a6:#008300; --a7:#4a3aa7; --a8:#898781;
+  }
+  body.dark{
+    --a1:#3987e5; --a2:#d95926; --a3:#199e70; --a4:#c98500;
+    --a5:#d55181; --a6:#008300; --a7:#9085e9; --a8:#898781;
+  }
+  .controls{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:14px 0 4px; }
+  .seg{ display:inline-flex; border:1px solid var(--axis); border-radius:6px; overflow:hidden; }
+  .seg button{ font:inherit; font-size:13px; font-weight:700; border:none; background:var(--tile); color:var(--ink-2); padding:6px 14px; cursor:pointer; }
+  .seg button + button{ border-left:1px solid var(--axis); }
+  .seg button.on{ background:var(--amber); color:#000; }
+  /* the three questions across the top: scope, range, measurement; each
+     group is a small heading over its buttons, with a dropdown where one
+     of the buttons has a second choice under it */
+  .ctl{ display:flex; flex-direction:column; gap:4px; }
+  .ctl-h{ font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-2); }
+  .ctl-row{ display:flex; gap:6px; align-items:center; }
+  select.dd{ font:inherit; font-size:12px; font-weight:700; border:1px solid var(--axis); border-radius:6px; background:var(--tile); color:var(--ink-2); padding:5px 8px; }
+  .ctl .seg button.off{ opacity:.45; }
+  .chart-tools{ display:flex; gap:8px; align-items:center; margin:2px 0 10px; flex-wrap:wrap; }
+  .chart-tools .lab{ font-size:11px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-2); }
+  .seg.small button{ padding:4px 10px; font-size:12px; }
+  #adminBox > summary{ cursor:pointer; font-weight:800; font-size:15px; }
+  #adminBox > summary .hint{ font-weight:600; margin-left:10px; }
+  #adminBox > .card, #adminBox > details{ margin-top:12px; }
+  .kpis{ grid-template-columns:repeat(3, 1fr); margin-top:12px; }
+  .kpis .tile .val{ font-size:38px; }
+
+  /* one row per person: name, bar, numbers */
+  .plist{ display:flex; flex-direction:column; gap:10px; margin-top:6px; }
+  .prow{ display:grid; grid-template-columns:150px 1fr 132px; gap:12px; align-items:center; }
+  .pname{ font-weight:800; font-size:15px; text-align:right; cursor:pointer; border:none; background:none; color:var(--ink); font-family:inherit; padding:2px 4px; border-radius:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pname:hover{ background:var(--blue-soft); }
+  .pname .sub{ display:block; font-size:11px; font-weight:600; color:var(--muted); }
+  .track{ position:relative; height:26px; }
+  /* named pbar, not bar: .bar is the black page header in board2.css, and a
+     second .bar declared here painted the header transparent */
+  .pbar{ display:flex; height:26px; border-radius:3px 5px 5px 3px; overflow:hidden; background:transparent; position:relative; }
+  /* the divider sits inside the segment's own width, so a thin segment is
+     never eaten by it and neighbours never look detached */
+  .pbar i{ display:flex; align-items:center; justify-content:center; height:100%; box-sizing:border-box; overflow:hidden; }
+  /* the area's own percent of standard, on a plate of its own so it stays
+     readable on every area colour in both themes */
+  .pbar i b{ font-size:10.5px; font-weight:800; line-height:1; padding:2px 4px; border-radius:3px;
+    background:rgba(255,255,255,.88); color:#151515; letter-spacing:-.2px; white-space:nowrap; }
+  .pbar i b.under{ color:#a51c1c; } .pbar i b.over{ color:#0a6b0a; }
+  .pbar i.div{ border-right:2px solid var(--surface); }
+  .pbar i:last-child{ border-right:none; border-radius:0 4px 4px 0; }
+  .pbar i:first-child{ border-radius:4px 0 0 4px; }
+  .pbar i:only-child{ border-radius:4px; }
+  /* a faint rule showing the full width, so a short bar still reads as short */
+  .track::before{ content:''; position:absolute; left:0; right:0; top:0; bottom:0; background:var(--hair); border-radius:4px; opacity:.5; }
+  /* the target marker: what those hours should have produced */
+  .goal{ position:absolute; top:-4px; bottom:-4px; width:3px; background:var(--ink); box-shadow:0 0 0 2px var(--surface); border-radius:2px; }
+  .goal.off{ width:0; border-left:7px solid var(--ink); border-top:6px solid transparent; border-bottom:6px solid transparent; top:7px; bottom:auto; background:none; box-shadow:none; border-radius:0; }
+  /* activity view */
+  .actaxis{ position:relative; height:16px; }
+  .actaxis span{ position:absolute; font-size:11px; color:var(--muted); transform:translateX(-50%); font-variant-numeric:tabular-nums; }
+  .acthead{ display:grid; grid-template-columns:150px 1fr 132px; gap:12px; margin-bottom:2px; }
+  .strip{ position:relative; height:22px; background:var(--hair); border-radius:4px; opacity:1; }
+  .strip i{ position:absolute; top:0; bottom:0; background:var(--a1); border-radius:3px; min-width:2px; }
+  .strip i.typ{ border-radius:0; min-width:0; }
+  /* breaks: orange between two dotted lines. closed time: a thin hatched gap */
+  .strip i.brk, .rateband i.brk{ background:rgba(240,180,0,.28); border-left:2px dotted var(--warn); border-right:2px dotted var(--warn); border-radius:0; min-width:0; box-sizing:border-box; z-index:0; }
+  /* The first minutes of a shift: a truck, a scanner, a pick list. Solid
+     orange rather than the breaks' dotted amber, because the complaint it
+     answers is that nobody could see the grey one. */
+  .strip i.setup, .rateband i.setup{ background:rgba(236,131,90,.38); border-left:2px solid var(--serious);
+                                     border-radius:0; min-width:0; box-sizing:border-box; z-index:0; }
+  .strip i.gap, .rateband i.gap{ background:repeating-linear-gradient(135deg, var(--ink) 0 2px, transparent 2px 5px); opacity:.35; border-radius:0; min-width:0; }
+  .strip i:not(.brk):not(.gap){ z-index:1; }
+  /* where the scans actually landed: runs of minutes that carried a
+     confirmation, drawn over the band, taller the faster they came. A burst
+     seconds apart reads solid and tall; a pair half an hour apart reads as
+     two thin ticks; and the credited time that runs on after the last pick
+     shows as band with no ticks on it. */
+  .strip i.pk{ top:auto; bottom:0; background:var(--ink); opacity:.62; border-radius:1px; min-width:1px; z-index:3; }
+  .trend rect.blk{ fill:var(--ink); opacity:.06; }
+  .trend rect.brk{ fill:var(--warn); opacity:.22; }
+  .trend line.brkl{ stroke:var(--warn); stroke-width:1.5; stroke-dasharray:3 3; }
+  /* Where the shift ends up if the rest of it goes like the part so far.
+     Pale, behind the solid picking, so the bar reads as one thing: what is
+     done, and what that pace would add. */
+  .track{ position:relative; }
+  .track .ghost{ position:absolute; left:0; top:0; bottom:0; border-radius:4px;
+                 background:var(--a1); opacity:.20; z-index:0; }
+  .track .pbar{ position:relative; z-index:1; }
+  /* rate over activity */
+  .hyb{ display:flex; flex-direction:column; gap:3px; }
+  .rateband{ position:relative; height:44px; background:var(--hair); border-radius:4px; overflow:hidden; }
+  .rateband i.rb{ position:absolute; bottom:0; background:var(--ink-2); opacity:.75; border-radius:2px 2px 0 0; z-index:1; }
+  .rateband i.rb.over{ background:var(--good); opacity:.9; } .rateband i.rb.under{ background:var(--crit); opacity:.85; } .rateband i.rb.near{ background:var(--ink-2); }
+  .rateband b.tl{ position:absolute; left:0; right:0; border-top:2px dotted var(--ink); opacity:.8; z-index:2; }
+  .rateband i.brk, .rateband i.gap, .rateband i.setup{ position:absolute; top:0; bottom:0; }
+  .prow:has(.hyb){ align-items:stretch; }
+  .prow.dim .strip i{ filter:grayscale(1); opacity:.45; }
+  .minor{ margin-top:16px; padding-top:12px; border-top:1px solid var(--hair); font-size:13px; color:var(--ink-2); }
+  .minor b{ color:var(--ink); }
+  .minor .who{ display:inline-block; margin:3px 10px 3px 0; }
+  .goal::after{ content:attr(data-lab); position:absolute; top:-15px; left:50%; transform:translateX(-50%); font-size:10px; font-weight:800; color:var(--ink-2); white-space:nowrap; }
+  .pnum{ text-align:right; font-variant-numeric:tabular-nums; }
+  .pnum .rate{ font-size:19px; font-weight:800; }
+  .pnum .rate small{ font-size:11px; font-weight:600; color:var(--muted); }
+  .pnum .pct{ font-size:12px; font-weight:800; }
+  .pct.over{ color:var(--good); } .pct.near{ color:var(--ink-2); } .pct.under{ color:var(--crit); }
+  #detail td.over{ color:var(--good); font-weight:700; } #detail td.under{ color:var(--crit); font-weight:700; }
+  .prow.dim .pbar i{ filter:grayscale(1); opacity:.4; }
+  .prow.dim .pname, .prow.dim .pnum{ opacity:.5; }
+  .prow.sel .pname{ background:var(--amber); color:#000; }
+
+  .legend2{ display:flex; flex-wrap:wrap; gap:14px; margin-top:14px; font-size:13px; color:var(--ink-2); align-items:center; }
+  .legend2 i{ display:inline-block; width:13px; height:13px; border-radius:3px; margin-right:6px; vertical-align:-2px; }
+  .legend2 .goalkey{ display:inline-block; width:3px; height:13px; background:var(--ink); margin-right:6px; vertical-align:-2px; }
+
+  .review{ background:var(--amber); color:#000; font-weight:800; font-size:12px; padding:3px 10px; border-radius:4px; }
+  #detail{ margin-top:14px; }
+  #detail .grid2{ display:grid; grid-template-columns:1.3fr 1fr; gap:14px; }
+  .trend svg{ width:100%; height:auto; display:block; overflow:visible; }
+  .trend .col{ fill:var(--a1); } .trend .col.under{ fill:var(--crit); } .trend .col.over{ fill:var(--good); }
+  .trend .base{ stroke:var(--axis); } .trend .grid line{ stroke:var(--hair); }
+  .trend text{ fill:var(--muted); font-size:11px; font-variant-numeric:tabular-nums; }
+  .trend .tgt{ stroke:var(--ink); stroke-width:2; stroke-dasharray:none; }
+  .trend.big svg{ width:100%; height:auto; }
+  .trend .ax text{ fill:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
+  .ln{ fill:none; stroke-linejoin:round; stroke-linecap:round; }
+  .ln.other{ stroke:var(--muted); stroke-width:2; opacity:.35; }
+  .ln.crew{ stroke:var(--ink-2); stroke-width:3; opacity:.85; }
+  .ln.sel{ stroke:var(--a1); stroke-width:3.5; }
+  .dot{ fill:var(--a1); stroke:var(--surface); stroke-width:2; }
+  .tline{ stroke:var(--crit); stroke-width:2; }
+  .tlab{ fill:var(--crit); font-size:12px; font-weight:800; }
+  .endlab{ fill:var(--a1); font-size:12px; font-weight:800; }
+  .endlab.crewlab{ fill:var(--ink-2); }
+  .lnkey{ display:inline-block; width:16px; height:3px; border-radius:2px; margin-right:6px; vertical-align:3px; }
+  .lnkey.other{ background:var(--muted); opacity:.5; }
+  .lnkey.crew{ background:var(--ink-2); height:4px; }
+  .lnkey.sel{ background:var(--a1); height:4px; }
+  .namerow{ display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+  .nchip{ font:inherit; font-size:13px; font-weight:700; border:1px solid var(--axis); background:var(--tile); color:var(--ink); border-radius:5px; padding:4px 10px; cursor:pointer; display:inline-flex; gap:8px; align-items:baseline; }
+  .nchip b{ font-variant-numeric:tabular-nums; color:var(--ink-2); }
+  .nchip:hover{ border-color:var(--amber); }
+  .nchip.on{ background:var(--a1); border-color:var(--a1); color:#fff; }
+  .nchip.on b{ color:#fff; }
+  .nchip.off{ opacity:.5; }
+  .empty-big{ text-align:center; padding:48px 20px; color:var(--ink-2); }
+  .empty-big b{ display:block; font-size:20px; color:var(--ink); margin-bottom:8px; }
+  .chips{ display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
+  .chips button{ font:inherit; font-size:11px; font-weight:700; border:1px solid var(--axis); background:var(--tile); color:var(--ink-2); border-radius:4px; padding:2px 7px; cursor:pointer; }
+  .chips button:hover{ border-color:var(--amber); color:var(--ink); }
+  .chips button.on{ background:var(--amber); border-color:var(--amber); color:#000; }
+  #tgtState.warn{ color:var(--crit); font-weight:700; }
+  #why summary{ font-size:13px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+  #why summary .hint{ text-transform:none; letter-spacing:0; font-weight:600; margin-left:10px; }
+  #why summary .hint.bad{ color:var(--crit); font-weight:800; }
+  .funnel{ display:grid; grid-template-columns:1fr auto auto; gap:2px 14px; font-size:14px; margin-top:10px; max-width:640px; }
+  .funnel div{ padding:3px 0; border-bottom:1px solid var(--hair); }
+  .funnel .n{ text-align:right; font-variant-numeric:tabular-nums; font-weight:700; }
+  .funnel .lost{ text-align:right; font-variant-numeric:tabular-nums; color:var(--crit); font-size:12px; }
+  .funnel .hd{ font-weight:800; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.05em; }
+  .vals{ display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .vals span{ background:var(--plane); border:1px solid var(--hair); border-radius:4px; padding:2px 8px; font-size:12px; font-variant-numeric:tabular-nums; }
+  .verdict{ margin-top:12px; padding:10px 12px; border-radius:6px; font-size:14px; line-height:1.45; }
+  .verdict.bad{ background:rgba(208,59,59,.10); border-left:4px solid var(--crit); }
+  .verdict.ok{ background:rgba(12,163,12,.08); border-left:4px solid var(--good); }
+  #tgtBox textarea{ width:100%; min-height:120px; font-family:Consolas, monospace; font-size:13px; padding:8px; border:1px solid var(--axis); border-radius:4px; background:var(--surface); color:var(--ink); }
+  /* the button sits over the third tile, which is the one it explains */
+  .kpiTop{ display:flex; justify-content:flex-end; margin-bottom:6px; }
+  #recCard .rechead{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
+  #recCard table{ width:100%; border-collapse:collapse; font-size:13px; }
+  #recCard th, #recCard td{ padding:6px 8px; border-bottom:1px solid var(--hair); text-align:left; }
+  #recCard th.n, #recCard td.n{ text-align:right; }
+  #recCard tr.recrow{ cursor:pointer; }
+  #recCard tr.recrow:hover{ background:var(--hair); }
+  #recCard tr.recrow.on{ background:var(--hair); }
+  #recCard .big{ font-weight:800; font-size:16px; }
+  #recCard .was{ color:var(--ink-2); }
+  #recCard .dlt{ color:var(--ink-2); font-size:12px; font-weight:700; }
+  #recCard .conf{ font-size:10px; font-weight:800; padding:2px 6px; border-radius:3px; letter-spacing:.4px; text-transform:uppercase; }
+  #recCard .conf.strong{ background:rgba(12,163,12,.14); color:var(--good); }
+  #recCard .conf.fair{ background:rgba(0,0,0,.07); color:var(--ink-2); }
+  #recCard .conf.thin{ background:rgba(208,59,59,.12); color:var(--crit); }
+  #recCard .contrib{ background:var(--surface); }
+  #recCard .contrib table{ font-size:12px; margin:4px 0 10px; }
+  #recCard .contrib td.damped{ color:var(--crit); font-weight:700; }
+  #recCard .rec-note{ font-size:12.5px; line-height:1.5; color:var(--ink-2); }
+  #recCard .rec-note li{ margin:3px 0; }
+  #recCard .record{ overflow-x:auto; }
+  #recCard .record td .w{ color:var(--ink-2); font-size:11px; }
+  @media (max-width:820px){ .prow{ grid-template-columns:110px 1fr 100px; } #detail .grid2{ grid-template-columns:1fr; } .kpis{ grid-template-columns:repeat(2,1fr); } }
+</style>
+</head>
+<body>
+<div class="bar" data-page="pickers" data-sub="Picker performance" data-tools="reset"></div>
+<main class="wrap">
+
+  <div class="controls" style="align-items:flex-end">
+    <div class="ctl">
+      <div class="ctl-h">Shift scope</div>
+      <div class="seg" id="scope">
+        <button data-scope="live" class="on" title="The shift that is on now, from when it started">This shift</button>
+        <button data-scope="today">Today</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <div class="ctl-h">Range</div>
+      <div class="ctl-row">
+        <div class="seg" id="range">
+          <button data-range="yesterday">Yesterday</button>
+          <button data-range="7">7 day</button>
+          <button data-range="30">30 day</button>
+        </div>
+        <select class="dd" id="rangeShift" title="Which shift the range covers"><option value="all">All shifts</option></select>
+      </div>
+    </div>
+    <div class="ctl">
+      <div class="ctl-h">Measurement</div>
+      <div class="ctl-row">
+        <div class="seg" id="measure">
+          <button data-measure="pct" class="on">% of target</button>
+          <button data-measure="rate">Picks / hour</button>
+          <button data-measure="lines" id="mLines" hidden>Lines / hour</button>
+          <button data-measure="activity">Activity</button>
+        </div>
+        <select class="dd" id="rateBasis" hidden title="Which target the picks-an-hour marker is drawn against"><option value="standard">against the standard</option><option value="recommended">against recommended</option></select>
+      </div>
+    </div>
+    <div style="margin-left:auto" class="hint" id="stamp"></div>
+  </div>
+
+  <div class="tiles kpis" id="kpis"></div>
+
+  <div class="card" style="margin-top:14px" data-mod="chart">
+    <h2>Picks against target <span id="chartSub"></span><span class="review" id="focusTag" style="display:none;margin-left:auto"></span></h2>
+    <div class="chart-tools">
+      <span class="lab">Show as</span>
+      <div class="seg small" id="view">
+        <button data-view="bars" class="on">Bars</button>
+        <button data-view="trend">Trend</button>
+        <button data-view="hybrid" title="Each person's pick rate through the day, with when they were picking underneath">Rate + activity</button>
+      </div>
+      <div class="seg small" id="sort">
+        <button data-sort="measure" class="on">Ranked</button>
+        <button data-sort="name">By name</button>
+      </div>
+      <button class="btn small" id="tableBtn">Table</button>
+    </div>
+    <div id="chart"></div>
+    <div id="table" style="display:none"></div>
+    <div class="legend2" id="legend"></div>
+  </div>
+
+  <div id="detail"></div>
+
+  <!-- everything that is not the picture: the standards, what they could
+       be, and how the numbers were arrived at -->
+  <details class="card" id="adminBox" style="margin-top:14px">
+    <summary>Admin <span class="hint">pick standards, recommended standards, where the numbers come from</span></summary>
+
+  <div class="kpiTop" style="margin-top:12px">
+    <button class="btn" id="recBtn" title="Standards worked out from what this crew has actually picked">Recommended standards</button>
+  </div>
+  <div id="recCard"></div>
+
+  <details class="card" id="why" style="margin-top:14px">
+    <summary>Where the numbers come from <span class="hint" id="whyOne"></span></summary>
+    <div id="whyBody"></div>
+  </details>
+
+  <div class="card" style="margin-top:14px" data-host-only>
+    <h2>Pick standards <span id="tgtState"></span></h2>
+    <p class="hint">The standards, the shift hours, the working week and what counts as a delivery line
+      now <b>settings live on</b> the <a href="/admin#picking">Settings page</a>, with everything else that is a
+      setting. They used to be down here behind a collapsed box, which is a strange place for the numbers every
+      other page is measured against.</p>
+    <p class="hint"><b>Recommended standards</b> above still works out what this crew is actually achieving &mdash;
+      read it here, type the result there.</p>
+    <a class="btn primary" href="/admin#picking">Open the settings page</a>
+  </div>
+  </details>
+</main>
+<div class="toast" id="toast"></div>
+
+<script src="/web/theme.js"></script>
+<script src="/web/board2.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const H = window.SLH;
+const esc = H.esc;
+/* One person at a time is the whole of review: clicking a name shows that
+   person and hides everyone else's, clicking it again brings them back. */
+let DAYS = 0, SORT = 'measure', METRIC = 'pct', VIEW = 'bars', SELECTED = null, SHOWTABLE = false, REP = null, MODE = 'host';
+/* The three questions across the top. Scope and range are one choice
+   between them: picking a scope clears the range and the other way round.
+   DAYS, METRIC and VIEW above are worked out from these, so the drawing
+   code reads what it always did. */
+let SCOPE = 'live', RANGE = null, RSHIFT = 'all', MEASURE = 'pct', BASIS = 'standard', CHARTVIEW = 'bars', OFFSET = 0;
+function syncState(){
+  DAYS = SCOPE === 'live' ? 0 : SCOPE === 'today' ? 1 : RANGE === 'yesterday' ? 1 : +RANGE;
+  OFFSET = (!SCOPE && RANGE === 'yesterday') ? 1 : 0;
+  METRIC = MEASURE === 'activity' ? 'pct' : MEASURE;
+  VIEW = MEASURE === 'activity' ? 'activity' : CHARTVIEW;
+  const on = (sel, key, val) => document.querySelectorAll(sel).forEach(x => x.classList.toggle('on', String(x.dataset[key]) === String(val)));
+  on('#scope button', 'scope', SCOPE);
+  on('#range button', 'range', RANGE);
+  on('#measure button', 'measure', MEASURE);
+  on('#view button', 'view', CHARTVIEW);
+  on('#sort button', 'sort', SORT);
+  // the shift dropdown belongs to the range; it fades when a scope is chosen
+  const rs = $('rangeShift'); if(rs){ rs.disabled = !!SCOPE; rs.style.opacity = SCOPE ? '.45' : ''; }
+  const rb = $('rateBasis'); if(rb){ rb.hidden = MEASURE !== 'rate'; rb.value = BASIS; }
+  const vt = $('view'); if(vt) vt.style.display = MEASURE === 'activity' ? 'none' : '';
+}
+function setChartView(v){ CHARTVIEW = v; if(MEASURE === 'activity') MEASURE = 'pct'; syncState(); render(); }
+
+/* The recommendation panel. Kept apart from the report above it because it
+   answers a different question: not "how did people do against the
+   standard" but "what should the standard be". */
+let MODS = null;   // the Shift-move and Ctrl-dock handles, re-applied after a redraw
+let REC = null, RECQ = { days: 30, level: 'recommended', basis: 'day', shift: 'all' }, RECEXP = {};
+let RECOPEN = (() => { try{ return localStorage.getItem('slh-rec-open') === '1'; }catch(e){ return false; } })();
+
+/* What each bar means. Percent of target is the default because it is the
+   only one where everybody is measured on the same axis: a pallet picker and
+   a flow picker both read against their own target, so the bars are
+   comparable without knowing what work each was given. */
+const METRICS = {
+  pct:      { lab: 'against their own target', val: p => p.pct || 0, goal: () => 100, fmt: v => Math.round(v) + '%' },
+  rate:     { lab: 'picks an hour', val: p => p.rate, goal: p => p.targetRate, fmt: v => Math.round(v * 10) / 10 + '/h' },
+  /* A delivery line split across two bins is two warehouse tasks but one
+     line, so lines are the distinct values of whichever column identifies a
+     line. With no column chosen a task is a line and this matches picks. */
+  lines:    { lab: 'delivery lines an hour', val: p => p.lineRate, goal: () => 0, fmt: v => Math.round(v * 10) / 10 + '/h' },
+};
+
+const AREA_VARS = ['--a1', '--a2', '--a3', '--a4', '--a5', '--a6', '--a7', '--a8'];
+let areaColor = {};
+function assignColours(areas){
+  areaColor = {};
+  areas.forEach((a, i) => { areaColor[a] = 'var(' + AREA_VARS[Math.min(i, AREA_VARS.length - 1)] + ')'; });
+}
+function fmtH(h){ const m = Math.round(h * 60); return Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0'); }
+/* 7a, 2:30p, 12a. Hours past 24 are the small hours of the next day, which
+   is how a shift that began last night is laid out. */
+function hourLabel(h){
+  const hh = ((h % 24) + 24) % 24, whole = Math.floor(hh), m = Math.round((hh - whole) * 60);
+  return (whole % 12 || 12) + (m ? ':' + String(m).padStart(2, '0') : '') + (whole < 12 ? 'a' : 'p');
+}
+/* The time axis for the activity views. Working windows are laid end to
+   end and the closed time between them is squeezed to a thin gap, so a
+   shift fills the strip instead of sitting in one corner of a 24 hour
+   line. Returns x as a percentage. */
+const GAP = 1.4;
+function timeScale(working, from, to){
+  let wins = (working || []).map(([a, b]) => [Math.max(a, from), Math.min(b, to)]).filter(([a, b]) => b > a);
+  if(!wins.length) wins = [[from, to]];
+  const total = wins.reduce((t, [a, b]) => t + (b - a), 0);
+  const gaps = GAP * (wins.length - 1);
+  const usable = 100 - gaps;
+  const starts = [];
+  let acc = 0;
+  wins.forEach(([a, b], i) => { starts.push(acc); acc += (b - a) / total * usable + (i < wins.length - 1 ? GAP : 0); });
+  const x = h => {
+    for(let i = 0; i < wins.length; i++){
+      const [a, b] = wins[i];
+      if(h <= b || i === wins.length - 1) return starts[i] + (Math.min(Math.max(h, a), b) - a) / total * usable;
+      // in the gap after this window: the gap's middle
+      if(h < wins[i + 1][0]) return starts[i] + (b - a) / total * usable + GAP / 2;
+    }
+    return 100;
+  };
+  return { wins, x, gapAt: wins.slice(0, -1).map(([a, b], i) => ({ h: b, x: starts[i] + (b - a) / total * usable, to: wins[i + 1][0] })) };
+}
+/* the marks behind a strip: closed gaps, and breaks as orange bands with a
+   dotted line at each end */
+function timeMarks(sc){
+  let out = sc.gapAt.map(g => '<i class="gap" style="left:' + g.x.toFixed(2) + '%;width:' + GAP + '%" title="closed ' + fmtH(g.h) + ' to ' + fmtH(g.to) + '"></i>').join('');
+  out += (REP.breaks || []).map(([a, b]) => {
+    const x1 = sc.x(a), x2 = sc.x(b);
+    if(x2 - x1 < 0.05) return '';
+    return '<i class="brk" style="left:' + x1.toFixed(2) + '%;width:' + (x2 - x1).toFixed(2) + '%" title="break ' + fmtH(a) + ' to ' + fmtH(b) + '"></i>';
+  }).join('');
+  /* The first minutes of the shift. Drawn, not taken out of anybody's time:
+     plenty of picks land in it, and removing the minutes while keeping the
+     picks would hand somebody a rate they did not work for. */
+  out += (REP.setup || []).map(([a, b]) => {
+    const x1 = sc.x(a), x2 = sc.x(b);
+    if(x2 - x1 < 0.05) return '';
+    return '<i class="setup" style="left:' + x1.toFixed(2) + '%;width:' + (x2 - x1).toFixed(2) + '%" title="shift setup ' + fmtH(a) + ' to ' + fmtH(b) + ' - getting a truck, a scanner, a pick list"></i>';
+  }).join('');
+  return out;
+}
+function timeAxis(sc){
+  const ticks = [];
+  sc.wins.forEach(([a, b]) => { for(let h = Math.ceil(a); h <= Math.floor(b); h++) ticks.push(h); });
+  return '<div class="actaxis">' + ticks.map(h => '<span style="left:' + sc.x(h).toFixed(2) + '%">' + hourLabel(h) + '</span>').join('') + '</div>';
+}
+/* the working windows and breaks for the current period; over several
+   days a typical weekday, with the small hours of a shift that crosses
+   midnight laid out after 24 */
+function periodShape(){
+  if(DAYS <= 1) return { working: REP.working || [], breaks: REP.breaks || [], wrap: 0 };
+  const t = REP.typical || {};
+  const wrap = t.wrap || 0;
+  const lift = ([a, b]) => (b <= wrap ? [a + 24, b + 24] : [a, b]);
+  // lifting the small hours past 24 can put a window after the others; keep them in order and join touching ones
+  const tidy = list => { const a = list.map(lift).sort((x, y) => x[0] - y[0]); const out = []; a.forEach(([x, y]) => { const l = out[out.length - 1]; if(l && x <= l[1] + 0.001) l[1] = Math.max(l[1], y); else out.push([x, y]); }); return out; };
+  return { working: tidy(t.working || []), breaks: tidy(t.breaks || []), wrap };
+}
+function toast(m){ const t = $('toast'); t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 1800); }
+/* Anonymous labels are by rank, so the same person keeps the same alias for
+   as long as the list is on screen. */
+function labelFor(p, i){
+  if(!SELECTED || SELECTED === p.who) return esc(p.who);
+  return 'Picker ' + (i + 1);
+}
+let BANDS = { good: 100, warn: 90 };      // until a report says otherwise
+function pctClass(pct){ return pct == null ? '' : pct >= BANDS.good ? 'over' : pct >= BANDS.warn ? 'near' : 'under'; }
+
+async function load(){
+  try{
+    const q = 'days=' + (DAYS || 1) + (DAYS === 0 ? '&shift=live' : (!SCOPE && RSHIFT !== 'all' ? '&shift=' + encodeURIComponent(RSHIFT) : '')) + (OFFSET ? '&offset=' + OFFSET : '');
+    const r = await fetch('/api/pickers?' + q, { cache: 'no-store' });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    REP = await r.json();
+    if(REP && REP.bands) BANDS = REP.bands;   // one definition, set on the picker page
+    render();
+  }catch(e){
+    $('chart').innerHTML = '<div class="empty-big"><b>Cannot reach the service</b>Try again in a moment.</div>';
+  }
+}
+async function loadMode(){
+  try{ const s = await (await fetch('/api/status', { cache:'no-store' })).json(); MODE = (s.server && s.server.mode) || 'host'; }catch(e){}
+}
+
+function render(){
+  const rep = REP;
+  if(!rep){ return; }
+  $('stamp').textContent = rep.live ? (rep.live.label + ' since ' + hourLabel(rep.live.start) + ', live')
+    : rep.daysWithData ? ('from ' + rep.daysWithData + ' day' + (rep.daysWithData === 1 ? '' : 's') + ' of records' + (rep.shiftName ? ', ' + rep.shiftName + ' shift only' : '')) : '';
+  /* the shifts the range can be narrowed to, from the working week */
+  const rs = $('rangeShift');
+  if(rs && rep.shiftNames && rs.options.length !== rep.shiftNames.length + 1){
+    rs.innerHTML = '<option value="all">All shifts</option>' + rep.shiftNames.map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>').join('');
+    rs.value = rep.shiftNames.indexOf(RSHIFT) >= 0 ? RSHIFT : 'all';
+  }
+  syncLinesBtn();
+  renderWhy();
+  const ts = $('tgtState');
+  if(ts){
+    ts.className = rep.targetsAreDefault ? 'warn' : '';
+    ts.textContent = rep.targetsAreDefault
+      ? 'these are placeholder numbers, not yours: set them below'
+      : 'picks an hour, per area';
+  }
+  const wh = (rep.feed && rep.feed.wh) || {};
+  // nothing to show yet
+  if(!rep.people.length){
+    $('kpis').innerHTML = '';
+    $('legend').innerHTML = '';
+    $('detail').innerHTML = '';
+    const why = wh.status === 'ok'
+      ? 'The warehouse task export was read, but no confirmed picks carried a name and a time for this period.'
+      : ('The warehouse task export is not loading (' + esc(wh.error || wh.status || 'not read') + '). Picker performance is built from it.');
+    $('chart').innerHTML = '<div class="empty-big"><b>No picks recorded yet</b>' + why + '</div>';
+    $('table').innerHTML = '';
+    renderWhy();
+    if($('why')) $('why').open = true;
+    return;
+  }
+  assignColours(rep.areas);
+
+  /* Ranked means ranked by the number on the screen. Sorting by anything
+     else leaves the bars out of order, which is the quickest way to make a
+     chart untrustworthy. */
+  /* against recommended: each person's marker is the recommended rate,
+     blended by the mix of areas they worked, the same way the standard is */
+  const recBlend = (MEASURE === 'rate' && BASIS === 'recommended' && REC && REC.ok && REC.areas) ? REC.areas.reduce((m, a) => { if(a.rec > 0) m[a.area] = a.rec; return m; }, {}) : null;
+  // nobody who did not pick in this period; an empty name on the board says nothing
+  const people = rep.people.filter(p => p.total > 0).map(p => {
+    if(!recBlend) return p;
+    let hours = 0, picks = 0;
+    for(const a in p.byArea){ const t = recBlend[a] || (rep.targetMap || {})[a] || 0; if(t > 0){ hours += p.byArea[a] / t; picks += p.byArea[a]; } }
+    return Object.assign({}, p, { targetRate: hours > 0 ? Math.round(picks / hours * 10) / 10 : p.targetRate });
+  });
+  if(SORT === 'name') people.sort((a, b) => a.who.localeCompare(b.who));
+  else { const v = METRICS[METRIC].val; people.sort((a, b) => (v(b) || 0) - (v(a) || 0)); }
+
+  const s = rep.summary;
+  tileN = 0;
+  const behind = people.filter(p => p.pct != null && p.pct < 90);
+  $('kpis').innerHTML =
+    tile('Against target', s.pct == null ? '&ndash;' : s.pct + '<small>%</small>',
+         s.rate + '/h across ' + s.pickers + ' picker' + (s.pickers === 1 ? '' : 's'),
+         s.pct == null ? '' : s.pct >= 100 ? 'good' : 'bad') +
+    tile(DAYS === 0 ? 'Picks this shift' : DAYS === 1 ? (OFFSET ? 'Picks yesterday' : 'Picks today') : 'Picks', s.picks.toLocaleString(), s.hours + ' active hours') +
+    tile('Behind target', behind.length, behind.length ? 'under 90% of their own rate' : 'everyone at 90% or better',
+         behind.length ? 'bad' : 'good');
+
+  $('chartSub').textContent = (DAYS === 0 ? (rep.live ? rep.live.label + ' so far' : 'this shift') : DAYS === 1 ? (OFFSET ? 'yesterday' : 'today') : 'last ' + DAYS + ' days') + (rep.shiftName ? ', ' + rep.shiftName + ' shift' : '') + ', ' + (MEASURE === 'activity' ? 'when they were picking' : METRICS[METRIC].lab) +
+    (recBlend ? ' against recommended' : '') +
+    (VIEW === 'trend' ? (rep.series && rep.series.by === 'hour' ? ', hour by hour' : ', day by day') : '') +
+    (METRIC === 'lines' && rep.linesAreTasks ? ' (no line column chosen yet, so one task counts as one line)' : '');
+  /* the activity pictures only draw people who were active in the period */
+  const active = people.filter(p => (p.windows && p.windows.length) || (p.hourActive && Object.keys(p.hourActive).length) || (p.firstH != null));
+  $('chart').innerHTML = (VIEW === 'activity' ? buildActivity(active)
+                        : VIEW === 'hybrid' ? buildHybrid(active)
+                        : VIEW === 'trend' ? buildTrend(people)
+                        : buildBars(people)) + minorNote();
+
+  const ft = $('focusTag');
+  ft.style.display = SELECTED ? '' : 'none';
+  ft.textContent = SELECTED ? SELECTED + ' only \u00b7 click the name again for everyone' : '';
+
+  fitPlates();
+
+  $('legend').innerHTML = VIEW !== 'bars' ? '' : rep.areas.map(a => '<span><i style="background:' + areaColor[a] + '"></i>' + esc(a) + '</span>').join('') +
+    (METRIC === 'lines' ? '' : '<span class="hint">the number on a block is that area against its own standard</span>') +
+    (METRIC === 'pct' ? '<span><span class="goalkey"></span>their target (100%)</span>'
+     : METRIC === 'rate' ? '<span><span class="goalkey"></span>' + (recBlend ? 'their recommended rate' : 'their target rate') + '</span>'
+     : METRIC === 'picks' ? '<span><span class="goalkey"></span>target for the hours worked</span>' : '');
+
+  // table twin, so nothing is locked behind colour
+  $('table').innerHTML = '<table><thead><tr><th>Picker</th><th class="n">Picks</th><th class="n">Active</th><th class="n">Per hour</th><th class="n">Target /h</th><th class="n">Of target</th>' +
+    rep.areas.map(a => '<th class="n">' + esc(a) + '</th>').join('') + '</tr></thead><tbody>' +
+    people.map((p, i) => '<tr><td>' + labelFor(p, i) + '</td><td class="n">' + p.total + '</td><td class="n">' + fmtH(p.activeHours) + '</td><td class="n">' + p.rate + '</td><td class="n">' + p.targetRate + '</td><td class="n">' + (p.pct == null ? '' : p.pct + '%') + '</td>' +
+      rep.areas.map(a => { const st = (p.areaStat || {})[a];
+        return '<td class="n">' + (p.byArea[a] || '') + (st && st.pct != null ? ' <span class="hint">' + st.pct + '%</span>' : '') + '</td>';
+      }).join('') + '</tr>').join('') + '</tbody></table>';
+
+  $('chart').style.display = SHOWTABLE ? 'none' : '';
+  $('table').style.display = SHOWTABLE ? '' : 'none';
+
+  document.querySelectorAll('.pname, .nchip').forEach(b => { b.onclick = () => select(b.dataset.who); });
+  renderDetail(people);
+  if(RECOPEN) loadRec();
+}
+let tileN = 0;
+/* Row wrapper shared by both views, so the name, review state and the
+   numbers on the right stay identical between them. */
+function rowShell(p, i, middle){
+  const cls = ['prow'];
+  if(SELECTED && SELECTED !== p.who) cls.push('dim');
+  if(SELECTED === p.who) cls.push('sel');
+  return '<div class="' + cls.join(' ') + '">' +
+    '<button class="pname" data-who="' + esc(p.who) + '" title="Click to show this person on their own, click again for everyone">' + labelFor(p, i) +
+      '<span class="sub">' + p.total + ' picks &middot; ' + fmtH(p.activeHours) + '</span></button>' +
+    middle +
+    '<div class="pnum"><div class="rate">' + METRICS[METRIC].fmt(METRICS[METRIC].val(p)) + '</div>' +
+      '<div class="pct ' + (METRIC === 'pct' || METRIC === 'activity' ? '' : pctClass(p.pct)) + '">' + secondLine(p) + '</div></div>' +
+  '</div>';
+}
+/* Whatever the bar is not already saying. */
+function secondLine(p){
+  if(METRIC === 'pct'){
+    /* Two questions, answered with one number. How fast somebody is going
+       is not how much of the day they have done: eight picks in half an
+       hour is a fine rate and almost none of a shift. The rate keeps the
+       name it has always had on this floor - KPI - and beside it is where
+       that rate lands them by the end of the shift. */
+    const pj = shiftProjection(p);
+    if(pj && pj.live && p.pct != null)
+      return p.pct + '% KPI · on target for ' + Math.round(pj.end) + '%';
+    return p.rate + '/h against ' + p.targetRate;
+  }
+  if(VIEW === 'activity') return fmtH(p.activeHours) + ' active';
+  if(METRIC === 'lines') return p.lines + ' lines from ' + p.total + ' picks';
+  return p.pct == null ? '' : p.pct + '% of target';
+}
+/* Picking hours still to come in the shift that is running: what is left
+   on the clock, less the breaks that have not happened yet. Null when this
+   is not a live shift, which is what turns the projection off for every
+   historical window. */
+function hoursLeftInShift(){
+  const L = REP && REP.live;
+  if(!L || L.end == null || L.nowH == null) return null;
+  let left = L.end - L.nowH;
+  if(!(left > 0.02)) return null;
+  (REP.breaks || []).forEach(([a, b]) => {
+    const lo = Math.max(a, L.nowH), hi = Math.min(b, L.end);
+    if(hi > lo) left -= (hi - lo);
+  });
+  return Math.max(0, left);
+}
+/* Where somebody stands against a whole shift, and where they finish if the
+   rest of it goes like the part that has happened.
+
+   The bar used to be percent of standard and nothing else, so eight picks
+   in half an hour drew a long bar and read as most of a day's work done.
+   It was neither - it was a rate. Rate and attainment are two questions and
+   they now have two answers: the deep part is what is actually picked
+   against a full shift at standard, the pale part is what the same rate
+   would add by the end of it. */
+function shiftProjection(p){
+  const left = hoursLeftInShift();
+  const dayH = (REP && REP.dayHours) || 6.5;
+  const full = (p.targetRate || 0) * dayH;        // picks a full shift at standard
+  if(!(full > 0)) return null;
+  const done = p.total / full * 100;
+  if(left == null) return { done: done, end: done, live: false };
+  const more = (p.rate || 0) * left / full * 100;
+  return { done: done, end: done + more, live: true, hoursLeft: left };
+}
+function buildBars(people){
+  const M = METRICS[METRIC];
+  /* on the percent measure the bar is attainment now, not rate */
+  const PROJ = METRIC === 'pct' ? people.map(shiftProjection) : null;
+  const projOn = !!(PROJ && PROJ.some(x => x && x.live));
+  let max;
+  if(METRIC === 'pct') max = projOn
+    ? Math.max(110, ...PROJ.map(x => x ? x.end : 0))
+    : Math.max(120, ...people.map(p => p.pct || 0));
+  else if(METRIC === 'rate') max = Math.max(1, ...people.map(p => Math.max(p.rate, p.targetRate || 0))) * 1.08;
+  else if(METRIC === 'lines') max = Math.max(1, ...people.map(p => p.lineRate || 0)) * 1.08;
+  else max = Math.max(1, ...people.map(p => p.total)) * 1.08;
+
+  return '<div class="plist">' + people.map((p, i) => {
+    const pj = PROJ ? PROJ[i] : null;
+    /* on a live shift the bar's length is what has actually been picked
+       against a whole shift; everywhere else it is the measure itself */
+    const v = (pj && pj.live) ? pj.done : M.val(p);
+    const parts = REP.areas.filter(a => p.byArea[a]).map(a => ({ a, w: p.total ? (v * (p.byArea[a] / p.total)) / max * 100 : 0 }));
+    /* Lines an hour has no per-area figure behind it (a line is not tied to
+       one storage type), so the plates only appear on the pick measures. */
+    const plates = METRIC !== 'lines';
+    const segs = parts.map((x, j) => {
+      const st = (p.areaStat || {})[x.a] || {};
+      const txt = st.pct == null ? '' : (st.pct > 999 ? '999+' : st.pct + '%');
+      // slivers never get one; the rest are measured after layout
+      const fits = txt && x.w >= 2.5;
+      return '<i class="' + (j < parts.length - 1 && x.w > 1.5 ? 'div' : '') + '" style="width:' + x.w.toFixed(2) + '%;background:' + areaColor[x.a] +
+        '" title="' + esc(x.a) + ': ' + p.byArea[x.a] + ' picks' +
+        (st.hours ? ' in ' + fmtH(st.hours) : '') +
+        (st.pct == null ? '' : ', ' + st.rate + ' an hour against a standard of ' + st.target + ' = ' + st.pct + '% of standard') + '">' +
+        (plates && fits ? '<b class="' + pctClass(st.pct) + '">' + txt + '</b>' : '') + '</i>';
+    }).join('');
+    const g = M.goal(p);
+    let goal = '';
+    if(g > 0){
+      const off = g > max;
+      const pos = off ? 99 : (g / max * 100);
+      goal = '<div class="goal' + (off ? ' off' : '') + '" style="left:' + pos.toFixed(2) + '%" data-lab="' +
+        (i === 0 ? 'target' : '') + '" title="target ' + (METRIC === 'picks' ? g + ' picks in ' + fmtH(p.activeHours) : M.fmt(g)) +
+        (off ? ' (beyond the scale)' : '') + '"></div>';
+    }
+    /* the pale run to the end of the shift, behind the solid part, so the
+       two read as one bar with a line in it rather than as two bars */
+    const ghost = (pj && pj.live && pj.end > pj.done)
+      ? '<div class="ghost" style="width:' + Math.min(100, pj.end / max * 100).toFixed(2) + '%" title="' +
+        esc(p.who) + ' is on course for ' + Math.round(pj.end) + '% of a full shift if the rest of it goes like the part so far (' +
+        fmtH(pj.hoursLeft) + ' of picking left)"></div>'
+      : '';
+    return rowShell(p, i, '<div class="track">' + ghost + '<div class="pbar">' + segs + '</div>' + goal + '</div>');
+  }).join('') + '</div>';
+}
+/* Whether a percent fits inside its block depends on the width of the
+   screen, which the markup cannot know, so the ones that would be clipped
+   are dropped once the real widths exist. */
+function fitPlates(){
+  document.querySelectorAll('#chart .pbar i > b').forEach(b => {
+    b.style.display = '';
+    const seg = b.parentElement.getBoundingClientRect().width;
+    if(!seg) return;   // drawn while the page was hidden; a later fit will judge it
+    if(b.getBoundingClientRect().width + 8 > seg) b.style.display = 'none';
+  });
+}
+window.addEventListener('resize', fitPlates);
+document.addEventListener('visibilitychange', fitPlates);
+
+/* When somebody picked, rather than how much. A row of short scattered
+   blocks is usually the reason a rate looks poor. */
+/* the span the activity views cover, and the scale that lays it out */
+function periodScale(){
+  const shape = periodShape();
+  const sh = REP.shift || { from: 6, to: 18 };
+  let from = sh.from, to = sh.to;
+  if(DAYS > 1 && shape.working.length){ from = Math.floor(shape.working[0][0]); to = Math.ceil(shape.working[shape.working.length - 1][1]); }
+  else if(shape.working.length){
+    // the shift's own window, extended if somebody picked outside it
+    from = Math.min(from, Math.floor(shape.working[0][0]));
+    to = Math.max(to, Math.ceil(shape.working[shape.working.length - 1][1]));
+  }
+  return { sc: timeScale(shape.working, from, to), shape, from, to };
+}
+/* Runs of minutes that carried a pick. Consecutive minutes merge into one
+   block so a burst is one tall bar rather than forty separate ticks, which
+   keeps the drawing honest and the page quick. */
+function pickRuns(list){
+  const out = [];
+  let cur = null;
+  (list || []).forEach(pair => {
+    const m = pair[0], n = pair[1];
+    if(cur && m - cur.to <= 1){ cur.to = m; cur.n += n; }
+    else { if(cur) out.push(cur); cur = { from: m, to: m, n: n }; }
+  });
+  if(cur) out.push(cur);
+  return out;
+}
+/* one person's strip: the day's windows, or a typical day over a period */
+function stripFor(p, sc, marks){  let wins = '';
+  const lift = h => (DAYS > 1 && periodShape().wrap && h < periodShape().wrap) ? h + 24 : h;
+  if(DAYS > 1 && p.hourActive){
+    const days = Math.max(1, p.days || 1);
+    wins = Object.keys(p.hourActive).map(h => {
+      const share = Math.min(1, p.hourActive[h] / days);
+      if(share < 0.02) return '';
+      const hh = lift(+h), x1 = sc.x(hh), x2 = sc.x(hh + 1);
+      return '<i class="typ" style="left:' + x1.toFixed(2) + '%;width:' + Math.max(0, x2 - x1).toFixed(2) + '%;opacity:' + (0.15 + 0.85 * share).toFixed(2) + '" title="' +
+        hourLabel(hh) + ': picking ' + Math.round(share * 100) + '% of this hour on a typical day (' + days + ' day' + (days === 1 ? '' : 's') + ')"></i>';
+    }).join('');
+  } else {
+    wins = (p.windows || []).map(([a, b]) => {
+      const x1 = sc.x(a), x2 = sc.x(b);
+      return '<i style="left:' + x1.toFixed(2) + '%;width:' + Math.max(0.2, x2 - x1).toFixed(2) + '%" title="' + fmtH(a) + ' to ' + fmtH(b) + ' credited as working"></i>';
+    }).join('');
+    // the scans themselves, over the band
+    const mk = (REP.marks || {})[p.who];
+    if(mk) wins += pickRuns(mk).map(r => {
+      const a = r.from / 60, b = (r.to + 1) / 60;
+      const x1 = sc.x(a), x2 = sc.x(b);
+      const mins = r.to - r.from + 1, perMin = r.n / mins;
+      const ht = Math.min(100, 34 + perMin * 22);
+      return '<i class="pk" style="left:' + x1.toFixed(2) + '%;width:' + Math.max(0.25, x2 - x1).toFixed(2) + '%;height:' + ht.toFixed(0) + '%" title="' +
+        fmtH(a) + (mins > 1 ? ' to ' + fmtH(b) : '') + ': ' + r.n + ' pick' + (r.n === 1 ? '' : 's') +
+        (mins > 1 ? ', ' + (Math.round(perMin * 10) / 10) + ' a minute' : ' in that minute') + '"></i>';
+    }).join('');
+  }
+  return '<div class="strip">' + marks + (wins || '<span class="hint" style="position:absolute;left:6px;top:3px">no times recorded</span>') + '</div>';
+}
+function activityNote(){
+  return '<div class="hint" style="margin-top:6px">' +
+    (DAYS > 1 ? 'A typical day for each person: the darker the hour, the more of it they were usually picking. ' : '') +
+    (DAYS > 1 ? '' : 'The pale band is time credited as working; the dark bars on it are the minutes that carried scans, taller the faster they came. Band with no bar on it is the tail credited after a pick. ') +
+    'Orange bands are breaks; the thin hatched gaps are closed time, squeezed out of the line. Neither counts as active time.</div>';
+}
+function buildActivity(people){
+  const { sc } = periodScale();
+  const marks = timeMarks(sc);
+  const axis = '<div class="acthead"><div></div>' + timeAxis(sc) + '<div></div></div>';
+  return axis + '<div class="plist">' + people.map((p, i) => rowShell(p, i, stripFor(p, sc, marks))).join('') + '</div>' + activityNote();
+}
+/* Rate on top, activity underneath, per person. The rate is picks an hour
+   in each clock hour, as bars against a dotted line at their own target;
+   the strip below says when they were actually picking. Over several days
+   both are a typical day. */
+function buildHybrid(people){
+  const { sc } = periodScale();
+  const marks = timeMarks(sc);
+  const S = REP.series || { by: 'hour', x: [], people: {} };
+  // per person: hour -> picks an hour
+  const rateOf = p => {
+    const out = {};
+    if(DAYS > 1){
+      if(p.hourActive && p.hourPicks) for(const h in p.hourPicks){ const a = p.hourActive[h] || 0; if(a >= 0.1) out[h] = p.hourPicks[h] / a; }
+    } else if(S.by === 'hour'){
+      (S.people[p.who] || []).forEach((v, i) => { if(v && v.hours >= 0.05) out[S.x[i]] = v.rate; });
+    }
+    return out;
+  };
+  const rates = people.map(rateOf);
+  let top = 1;
+  rates.forEach(r => Object.keys(r).forEach(h => { if(r[h] > top) top = r[h]; }));
+  people.forEach(p => { if(p.targetRate > top) top = p.targetRate; });
+  top *= 1.1;
+  const lift = h => (DAYS > 1 && periodShape().wrap && h < periodShape().wrap) ? h + 24 : h;
+  const axis = '<div class="acthead"><div></div>' + timeAxis(sc) + '<div></div></div>';
+  return axis + '<div class="plist">' + people.map((p, i) => {
+    const r = rates[i];
+    const bars = Object.keys(r).map(h => {
+      const hh = lift(+h), x1 = sc.x(hh), x2 = sc.x(hh + 1);
+      const v = r[h];
+      const cls = p.targetRate ? (v >= p.targetRate ? 'over' : v >= p.targetRate * 0.9 ? 'near' : 'under') : '';
+      return '<i class="rb ' + cls + '" style="left:' + (x1 + 0.15).toFixed(2) + '%;width:' + Math.max(0.3, x2 - x1 - 0.3).toFixed(2) + '%;height:' + Math.min(100, v / top * 100).toFixed(1) + '%" title="' +
+        hourLabel(hh) + ': ' + Math.round(v * 10) / 10 + ' an hour' + (p.targetRate ? ' against ' + p.targetRate : '') + '"></i>';
+    }).join('');
+    const tl = p.targetRate ? '<b class="tl" style="bottom:' + Math.min(100, p.targetRate / top * 100).toFixed(1) + '%" title="their target: ' + p.targetRate + ' an hour"></b>' : '';
+    const band = '<div class="rateband">' + timeMarks(sc) + bars + tl + '</div>';
+    return rowShell(p, i, '<div class="hyb">' + band + stripFor(p, sc, marks) + '</div>');
+  }).join('') + '</div>' +
+  '<div class="hint" style="margin-top:6px">Top: picks an hour in each hour, against the dotted line of their own target (green at or above, red under 90%). Bottom: when they were picking.' +
+  (DAYS > 1 ? ' Over several days both are a typical day.' : '') + ' Orange bands are breaks; hatched gaps are closed time.</div>';
+}
+/* Everyone drawn thin and grey, the person under review lifted out in
+   colour, and the crew as a heavier line so an individual reads against the
+   floor as well as against target. Nulls break the line rather than being
+   drawn through, because an hour with no picks is not a zero rate, it is an
+   hour they were not picking. */
+const SERIES_VAL = { pct: v => v.pct, rate: v => v.rate, lines: v => v.lineRate, picks: v => v.picks };
+function buildTrend(people){
+  const S = REP.series;
+  if(!S || !S.x.length) return '<div class="empty-note">No trend to draw yet. Today needs confirmation times; the longer views need more than one day of records.</div>';
+  const get = SERIES_VAL[METRIC] || SERIES_VAL.rate;
+  const xs = S.x;
+  const W = 1000, Hh = 330, padL = 46, padB = 30, padT = 16, padR = 92;
+  const plotW = W - padL - padR, plotH = Hh - padB - padT;
+  const vals = [];
+  people.forEach(p => (S.people[p.who] || []).forEach(v => { if(v){ const n = get(v); if(n != null) vals.push(n); } }));
+  S.crew.forEach(v => { if(v){ const n = get(v); if(n != null) vals.push(n); } });
+  const sel = SELECTED ? people.find(p => p.who === SELECTED) : null;
+  const tgt = METRIC === 'pct' ? 100 : (METRIC === 'rate' && sel ? sel.targetRate : 0);
+  if(tgt) vals.push(tgt);
+  if(!vals.length) return '<div class="empty-note">Nothing to plot for this measure.</div>';
+  const top = Math.max(...vals) * 1.12 || 1;
+  const step = top <= 25 ? 5 : top <= 60 ? 10 : top <= 150 ? 25 : 50;
+  const ceil = Math.ceil(top / step) * step;
+  const x = i => padL + (xs.length === 1 ? plotW / 2 : (i / (xs.length - 1)) * plotW);
+  const y = v => padT + plotH - (v / ceil) * plotH;
+  const label = (k) => S.by === 'hour' ? hourLabel(k) : String(k).slice(5).replace('-', '/');
+
+  /* a run of consecutive points, so gaps break the path */
+  const pathFor = arr => {
+    const out = [];
+    let run = [];
+    arr.forEach((v, i) => {
+      const n = v ? get(v) : null;
+      if(n == null){ if(run.length) out.push(run); run = []; }
+      else run.push([x(i), y(n)]);
+    });
+    if(run.length) out.push(run);
+    return out.map(r => 'M' + r.map(pt => pt[0].toFixed(1) + ',' + pt[1].toFixed(1)).join('L')).join(' ');
+  };
+
+  let g = '<svg viewBox="0 0 ' + W + ' ' + Hh + '" role="img" aria-label="' + esc(METRICS[METRIC].lab) + ' over time">';
+  if(S.by === 'hour' && xs.length > 1 && REP.blocked){
+    /* hours as positions: the axis runs from the first hour with picks to the last */
+    const h0 = xs[0], hs = xs[xs.length - 1] - xs[0];
+    const xh = h => padL + ((h - h0) / hs) * plotW;
+    const brk = REP.breaks || [];
+    REP.blocked.forEach(([a, b]) => {
+      const x1 = Math.max(a, h0), x2 = Math.min(b, xs[xs.length - 1]);
+      if(x2 <= x1) return;
+      const isBreak = brk.some(([p, q]) => p <= a && q >= b);
+      g += '<rect class="' + (isBreak ? 'brk' : 'blk') + '" x="' + xh(x1).toFixed(1) + '" y="' + padT + '" width="' + (xh(x2) - xh(x1)).toFixed(1) + '" height="' + plotH + '"/>';
+      if(isBreak) g += '<line class="brkl" x1="' + xh(x1).toFixed(1) + '" x2="' + xh(x1).toFixed(1) + '" y1="' + padT + '" y2="' + (padT + plotH) + '"/>' +
+                       '<line class="brkl" x1="' + xh(x2).toFixed(1) + '" x2="' + xh(x2).toFixed(1) + '" y1="' + padT + '" y2="' + (padT + plotH) + '"/>';
+    });
+  }
+  g += '<g class="grid">';
+  for(let v = 0; v <= ceil; v += step) g += '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y(v).toFixed(1) + '" y2="' + y(v).toFixed(1) + '"/>';
+  g += '</g><g class="ax">';
+  for(let v = 0; v <= ceil; v += step) g += '<text x="' + (padL - 8) + '" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end">' + v + '</text>';
+  xs.forEach((k, i) => { if(xs.length <= 14 || i % Math.ceil(xs.length / 12) === 0)
+    g += '<text x="' + x(i).toFixed(1) + '" y="' + (Hh - 9) + '" text-anchor="middle">' + esc(label(k)) + '</text>'; });
+  g += '</g>';
+  if(tgt) g += '<line class="tline" x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y(tgt).toFixed(1) + '" y2="' + y(tgt).toFixed(1) + '"/>' +
+    '<text class="tlab" x="' + (W - padR + 6) + '" y="' + (y(tgt) + 4).toFixed(1) + '">target</text>';
+
+  // everyone else, quiet
+  people.forEach(p => { if(SELECTED === p.who) return;
+    g += '<path class="ln other" d="' + pathFor(S.people[p.who] || []) + '"><title>' + esc(SELECTED ? 'another picker' : p.who) + '</title></path>'; });
+  // the crew
+  g += '<path class="ln crew" d="' + pathFor(S.crew) + '"></path>';
+  // the person under review, on top
+  if(sel){
+    const arr = S.people[sel.who] || [];
+    g += '<path class="ln sel" d="' + pathFor(arr) + '"></path>';
+    arr.forEach((v, i) => { if(!v) return; const n = get(v); if(n == null) return;
+      g += '<circle class="dot" cx="' + x(i).toFixed(1) + '" cy="' + y(n).toFixed(1) + '" r="4"><title>' +
+        esc(label(xs[i])) + ': ' + METRICS[METRIC].fmt(n) + ', ' + v.picks + ' picks in ' + fmtH(v.hours) + '</title></circle>'; });
+    const last = arr.map((v, i) => [v, i]).filter(([v]) => v && get(v) != null).pop();
+    if(last) g += '<text class="endlab" x="' + (W - padR + 6) + '" y="' + (y(get(last[0])) + 4).toFixed(1) + '">' + esc(sel.who) + '</text>';
+  } else {
+    const lastC = S.crew.map((v, i) => [v, i]).filter(([v]) => v && get(v) != null).pop();
+    if(lastC) g += '<text class="endlab crewlab" x="' + (W - padR + 6) + '" y="' + (y(get(lastC[0])) + 4).toFixed(1) + '">crew</text>';
+  }
+  g += '</svg>';
+  const key = '<div class="legend2" style="margin-top:8px">' +
+    '<span><span class="lnkey other"></span>each picker</span>' +
+    '<span><span class="lnkey crew"></span>crew average</span>' +
+    (sel ? '<span><span class="lnkey sel"></span>' + esc(sel.who) + '</span>' : '<span class="hint">click a name below to lift one person out</span>') +
+    '</div>';
+  /* names to click, not a second drawing of the same numbers */
+  const picker = '<div class="namerow">' + people.map((p, i) => {
+    const cls = ['nchip'];
+    if(SELECTED === p.who) cls.push('on');
+    else if(SELECTED) cls.push('off');
+    return '<button class="' + cls.join(' ') + '" data-who="' + esc(p.who) + '">' + labelFor(p, i) +
+      '<b>' + METRICS[METRIC].fmt(METRICS[METRIC].val(p)) + '</b></button>';
+  }).join('') + '</div>';
+  return '<div class="trend big">' + g + '</div>' + key + picker;
+}
+
+const LEVEL_LAB = { typical: 'Typical (half the crew)', recommended: 'Recommended', stretch: 'Stretch' };
+async function loadRec(force){
+  if(!RECOPEN && !force) return;
+  try{
+    const q = 'days=' + RECQ.days + '&level=' + RECQ.level + '&basis=' + RECQ.basis + '&shift=' + RECQ.shift;
+    const r = await fetch('/api/recommend?' + q, { cache: 'no-store' });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    REC = await r.json();
+  }catch(e){ REC = { ok: false, note: 'Could not work out a recommendation: ' + e.message }; }
+  renderRec();
+}
+/* Existing lines keep their spelling and anything the recommendation has
+   nothing to say about is left alone, so pressing this never quietly drops
+   a standard somebody set by hand. */
+function mergeStandards(text, areas){
+  const map = {};
+  areas.forEach(a => { if(a.rec != null) map[a.area.toLowerCase()] = a; });
+  const seen = {};
+  const lines = String(text || '').split('\n').map(l => {
+    const m = l.match(/^\s*([^=]+?)\s*=\s*[0-9.]+\s*$/);
+    if(!m) return l;
+    const key = m[1].trim().toLowerCase();
+    if(map[key]){ seen[key] = 1; return m[1].trim() + ' = ' + map[key].rec; }
+    return l;
+  }).filter((l, i, arr) => l.trim() || i < arr.length - 1);
+  Object.keys(map).forEach(k => { if(!seen[k]) lines.push(map[k].area + ' = ' + map[k].rec); });
+  return lines.join('\n');
+}
+function seg(id, opts, cur){
+  return '<div class="seg" data-rec="' + id + '">' + opts.map(o =>
+    '<button data-v="' + esc(String(o.v)) + '"' + (String(o.v) === String(cur) ? ' class="on"' : '') + '>' + esc(o.lab) + '</button>').join('') + '</div>';
+}
+function renderRec(){
+  const box = $('recCard');
+  $('recBtn').classList.toggle('primary', RECOPEN);
+  if(!RECOPEN){ box.innerHTML = ''; return; }
+  if(!REC){ box.innerHTML = '<div class="card" style="margin-top:12px"><div class="hint">Working it out&hellip;</div></div>'; return; }
+  const r = REC;
+  const controls = '<div class="rechead">' +
+    seg('days', [{ v: 7, lab: '7 days' }, { v: 30, lab: '30 days' }, { v: 90, lab: '90 days' }], RECQ.days) +
+    seg('level', [{ v: 'typical', lab: 'Typical' }, { v: 'recommended', lab: 'Recommended' }, { v: 'stretch', lab: 'Stretch' }], RECQ.level) +
+    seg('basis', [{ v: 'day', lab: (r.dayHours || 6.5) + ' h day' }, { v: 'active', lab: 'Active time' }], RECQ.basis) +
+    (r.shifts && r.shifts.length > 1
+      ? seg('shift', [{ v: 'all', lab: 'All shifts' }].concat(r.shifts.map(x => ({ v: x.key, lab: x.key }))), RECQ.shift)
+      : '<span class="hint">' + (r.shifts && r.shifts.length === 1 ? esc(r.shifts[0].label) : 'no shift pattern yet') + '</span>') +
+    '<span class="hint" style="margin-left:auto">' + r.daysWithData + ' day' + (r.daysWithData === 1 ? '' : 's') + ' of records</span>' +
+    '</div>';
+
+  if(!r.ok){
+    box.innerHTML = '<div class="card" style="margin-top:12px" data-mod="rec"><h2>Recommended standards</h2>' + controls +
+      '<div class="empty-note">' + esc(r.note || 'Nothing to recommend yet.') + '</div></div>';
+    wireRec();
+    return;
+  }
+
+  const rows = r.areas.map(a => {
+    const open = RECEXP[a.area];
+    const arrow = a.delta == null ? '' : (a.delta > 0 ? '&uarr; ' : a.delta < 0 ? '&darr; ' : '') + Math.abs(a.delta) + '%';
+    const main = '<tr class="recrow' + (open ? ' on' : '') + '" data-area="' + esc(a.area) + '">' +
+      '<td><i style="display:inline-block;width:11px;height:11px;border-radius:2px;background:' + (areaColor[a.area] || 'var(--ink-2)') + ';margin-right:7px"></i>' + esc(a.area) + '</td>' +
+      '<td class="n was">' + (a.current || '&ndash;') + '</td>' +
+      '<td class="n"><span class="big">' + (a.rec == null ? '&ndash;' : a.rec) + '</span> <span class="dlt">' + arrow + '</span></td>' +
+      '<td class="n">' + (a.perDay == null ? '' : a.perDay.toLocaleString()) + '</td>' +
+      '<td class="n">' + (a.attain == null ? '' : a.attain + '%') + '</td>' +
+      '<td class="n">' + a.people + ' &middot; ' + a.personDays + '</td>' +
+      '<td><span class="conf ' + a.confidence + '">' + a.confidence + '</span></td>' +
+    '</tr>';
+    if(!open) return main;
+    const detail = '<tr class="contrib"><td colspan="7">' +
+      '<div class="hint">Everybody who picked ' + esc(a.area) + ' for long enough to count. Weight is how much they moved the number: it grows with hours worked, and shrinks for a fast picker who only does this one area.</div>' +
+      '<table><thead><tr><th>Picker</th><th class="n">Their rate</th><th class="n">Hours here</th><th class="n">Share of their time</th><th class="n">Weight</th></tr></thead><tbody>' +
+      a.contributors.map(c => '<tr><td>' + esc(SELECTED && SELECTED !== c.who ? '\u2014' : c.who) + '</td>' +
+        '<td class="n">' + c.rate + '</td><td class="n">' + c.hours + '</td>' +
+        '<td class="n">' + Math.round(c.share * 100) + '%</td>' +
+        '<td class="n' + (c.damp < 1 ? ' damped' : '') + '">' + c.weight + (c.damp < 1 ? ' &times;' + c.damp : '') + '</td></tr>').join('') +
+      '</tbody></table>' +
+      (a.undamped != null && a.rec != null && a.undamped !== a.rec
+        ? '<div class="hint">Without that damping this area would read ' + a.undamped + ' an hour instead of ' + a.rec + '.</div>' : '') +
+      '</td></tr>';
+    return main + detail;
+  }).join('');
+
+  const table = '<table><thead><tr><th>Pick area</th><th class="n">Standard now</th><th class="n">' + esc(LEVEL_LAB[RECQ.level] || 'Recommended') +
+    '</th><th class="n">Over a ' + (r.dayHours || 6.5) + ' h day</th><th class="n">Days meeting it</th><th class="n">People &middot; days</th><th>Evidence</th></tr></thead><tbody>' +
+    rows + '</tbody></table>';
+
+  /* the daily record: what each day on its own would have suggested, so a
+     standard can be watched settling instead of taken from one shift */
+  let record = '';
+  if(r.trend && r.trend.length > 1){
+    const names = [];
+    r.trend.forEach(t => Object.keys(t.areas || {}).forEach(a => { if(names.indexOf(a) < 0) names.push(a); }));
+    const order = r.areas.map(a => a.area).filter(a => names.indexOf(a) >= 0).concat(names.filter(a => !r.areas.some(x => x.area === a)));
+    record = '<h2 style="margin-top:16px">Daily record <span>' + (RECQ.shift === 'all' ? 'all shifts' : esc(RECQ.shift) + ' shift') + '</span></h2>' +
+      '<div class="hint" style="margin-bottom:6px">What that day on its own would have suggested, with the running window in grey. Written every time the tool reads a task export, so today keeps moving until the shift is done.</div>' +
+      '<div class="record"><table><thead><tr><th>Day</th>' + order.map(a => '<th class="n">' + esc(a) + '</th>').join('') + '</tr></thead><tbody>' +
+      r.trend.slice().reverse().map(t => '<tr><td>' + esc(t.day.slice(5).replace('-', '/')) + (t.day === r.todayKey ? ' <span class="hint">today</span>' : '') + '</td>' +
+        order.map(a => { const v = (t.areas || {})[a];
+          return '<td class="n">' + (v && v.d1 != null ? v.d1 : '') + (v && v.dW != null ? ' <span class="w">' + v.dW + '</span>' : '') + '</td>'; }).join('') + '</tr>').join('') +
+      '</tbody></table></div>';
+  }
+
+  const how = '<details style="margin-top:14px"><summary>How these are worked out</summary><div class="rec-note"><ul>' +
+    '<li>One person, one area, one day is one observation. It has to be at least ' + Math.round(r.minHours * 60) + ' minutes and ' + r.minPicks + ' picks to count, so a couple of stray tasks cannot set a standard.</li>' +
+    '<li>A day is worth at most <b>' + (r.dayHours || 6.5) + ' picking hours</b>. Measured active time longer than that is scaled back to it, which raises the rate it implies. Anybody on the floor for less is credited with what they were there for.</li>' +
+    '<li>Hours count as their square root, so somebody with ten times the hours weighs about three times as much, not ten.</li>' +
+    '<li>A picker who beats the middle of the crew <b>and</b> only works this one area is damped by up to ' + Math.round(r.specDamp * 100) + '%. Part of that rate is never switching tasks, and a standard set from it is a standard set for a specialist. Nobody is damped for being slow.</li>' +
+    '<li>The figure is a percentile of what people actually did (' + r.level + 'th at this setting), not an average, so one wild day cannot move it.</li>' +
+    '<li>"Days meeting it" is the share of qualifying person-days at or above the recommendation. It is the honest read on whether a number is reachable.</li>' +
+    '</ul></div></details>';
+
+  box.innerHTML = '<div class="card" style="margin-top:12px" data-mod="rec">' +
+    '<h2>Recommended standards <span>from this warehouse\u2019s own picking</span>' +
+      '<button class="btn small" id="recClose" style="margin-left:auto">Close</button></h2>' +
+    controls + table +
+    '<div class="row" style="margin-top:12px;align-items:center">' +
+      '<button class="btn primary" id="recApply" data-host-only>Put these in the standards box</button>' +
+      '<span class="hint" data-host-only>Nothing changes until you look them over and press Save down in Pick standards.</span>' +
+    '</div>' + record + how + '</div>';
+  wireRec();
+  if(MODS) MODS.apply();   // the panel is built after the page, so it needs the layout applied to it
+}
+function wireRec(){
+  document.querySelectorAll('#recCard [data-rec] button').forEach(b => {
+    b.onclick = () => {
+      const key = b.parentElement.dataset.rec;
+      RECQ[key] = key === 'days' ? +b.dataset.v : b.dataset.v;
+      loadRec();
+    };
+  });
+  document.querySelectorAll('#recCard tr.recrow').forEach(t => {
+    t.onclick = () => { const a = t.dataset.area; RECEXP[a] = !RECEXP[a]; renderRec(); };
+  });
+  const cl = $('recClose');
+  if(cl) cl.onclick = () => { RECOPEN = false; try{ localStorage.setItem('slh-rec-open', '0'); }catch(e){} renderRec(); };
+  const ap = $('recApply');
+  if(ap) ap.onclick = async () => {
+    if(!REC || !REC.areas) return;
+    /* The standards are typed on the settings page now, so this hands the
+       text over rather than filling a box that is no longer here. */
+    const text = mergeStandards((REP && REP.targets) || '', REC.areas);
+    try{
+      await navigator.clipboard.writeText(text);
+      toast('Copied \u2014 paste into Settings \u203a Picking and press Save');
+    }catch(err){
+      /* no clipboard on this screen: show them instead, which is the same
+         job done with a finger */
+      window.prompt('Copy these into Settings \u203a Picking:', text);
+    }
+  };
+}
+$('recBtn').onclick = () => {
+  RECOPEN = !RECOPEN;
+  try{ localStorage.setItem('slh-rec-open', RECOPEN ? '1' : '0'); }catch(e){}
+  if(RECOPEN && !REC) loadRec(); else renderRec();
+};
+
+/* The one question this panel answers: when a rate looks too low, is the
+   arithmetic wrong or is the export short? It shows the funnel and the
+   values actually present, so nothing about this system has to be assumed. */
+function renderWhy(){
+  const box = $('why'), body = $('whyBody'), one = $('whyOne');
+  if(!box) return;
+  const d = REP && REP.diag;
+  if(!d || !d.ok){ body.innerHTML = '<div class="empty-note">' + esc((d && d.note) || 'No task export has been read yet.') + '</div>'; one.textContent = ''; return; }
+  const fn = d.funnel;
+  const rowsOf = [
+    ['Rows in the task export', fn.total],
+    ['Activity is PICK', fn.isPick],
+    ['Status is C, meaning confirmed', fn.confirmed],
+    ['Confirmed today', fn.confirmedToday],
+    ['Has a name in Confirmed By', fn.hasWho],
+    ['Has a usable Confirmation Time', fn.hasTime]
+  ];
+  let prev = null;
+  const funnel = '<div class="funnel"><div class="hd">Step</div><div class="hd n">Rows</div><div class="hd lost">Dropped</div>' +
+    rowsOf.map(([lab, n]) => {
+      const lost = prev == null ? '' : (prev - n ? '-' + (prev - n).toLocaleString() : '');
+      prev = n;
+      return '<div>' + lab + '</div><div class="n">' + n.toLocaleString() + '</div><div class="lost">' + lost + '</div>';
+    }).join('') + '</div>';
+
+  const vals = (title, arr) => !arr.length ? '' :
+    '<div style="margin-top:12px"><div class="hint">' + title + '</div><div class="vals">' +
+    arr.map(([v, n]) => '<span>' + esc(v) + ' <b>' + n.toLocaleString() + '</b></span>').join('') + '</div></div>';
+
+  /* the verdict, in order of how badly each thing breaks the numbers */
+  const notes = [];
+  let bad = false;
+  /* A column the rate cannot work without is a real problem. A column only
+     used to filter means the filter is skipped, which lets more rows through
+     rather than fewer. A column used only to explain the numbers is worth
+     mentioning and nothing more. */
+  const miss = k => (d.missing || []).filter(x => (x.kind || 'need') === k);
+  const names = a => a.map(x => '<b>' + esc(x.label || x) + '</b>').join(', ');
+  if(miss('need').length){ bad = true; notes.push('The export has no ' + names(miss('need')) + ' column, and a rate cannot be worked out without it.'); }
+  if(miss('filter').length) notes.push('No ' + names(miss('filter')) + ' column in the export, so that filter is skipped. That lets more rows through, not fewer, so the count may be too high rather than too low.');
+  if(miss('derived').length) notes.push('No ' + names(miss('derived')) + ' column in the export: this SAP layout leaves it out. A task counts as confirmed when it carries a Confirmation Date and open when it does not, which is what the status code would have said.');
+  if(miss('diag').length) notes.push('No ' + names(miss('diag')) + ' column in the export. Nothing depends on it, but without it this panel cannot tell you whether the pull asked SAP for a wide enough window.');
+  const acts = d.activity.map(a => a[0]);
+  if(fn.total && !fn.isPick){ bad = true; notes.push('Not one row has an Activity of <b>PICK</b>. This system spells it differently: the values present are ' + acts.slice(0, 5).map(esc).join(', ') + '. Tell me which one means picking and it is a one line change.'); }
+  if(fn.isPick && !fn.confirmed){ bad = true; notes.push(miss('derived').length ? 'No row carries a Confirmation Date, so nothing counts as confirmed.' : 'No row has a Warehouse Task Status of <b>C</b>. The values present are ' + d.status.map(x => esc(x[0])).slice(0, 5).join(', ') + '.'); }
+  if(d.createSpan && d.createSpan.days <= 1 && fn.confirmed){
+    bad = true;
+    notes.push('Every task in this export was created on <b>' + esc(d.createSpan.from) + '</b>. The pull asks SAP for tasks by <b>creation</b> date, but a rate counts <b>confirmations</b>. Anything created earlier and picked today is not in the file at all, which understates every rate on this page. Raise <b>Task creation lookback</b> in Admin, Configuration' +
+      (REP.wtBackDays != null ? ' (it is ' + REP.wtBackDays + ' day' + (REP.wtBackDays === 1 ? '' : 's') + ' now)' : '') + '.');
+  }
+  if(fn.confirmed && fn.confirmedToday < fn.confirmed * 0.5){
+    notes.push('Only ' + Math.round(fn.confirmedToday / fn.confirmed * 100) + '% of the confirmed picks in this file were confirmed today. The rest are older work and are correctly left out of today, but they suggest the file spans more than one day.');
+  }
+  if(!notes.length) notes.push('Nothing is being dropped unexpectedly. Every confirmed pick in the export carries a name and a time, so the rates are as complete as the export is.');
+  const verdict = '<div class="verdict ' + (bad ? 'bad' : 'ok') + '">' + notes.map(n => '<div>' + n + '</div>').join('') + '</div>';
+
+  one.className = 'hint' + (bad ? ' bad' : '');
+  one.textContent = bad ? 'something here is cutting the numbers down' : (fn.hasTime.toLocaleString() + ' picks counted from ' + fn.total.toLocaleString() + ' rows');
+  body.innerHTML = verdict + funnel +
+    vals('Activity values in the file', d.activity) +
+    vals('Warehouse task status values', d.status) +
+    vals('Creation dates in the file', d.createDates) +
+    vals('Confirmation dates in the file', d.confDates);
+}
+
+/* People below the "counts as a picker" floor, named but not ranked. */
+function minorNote(){
+  const m = (REP.minor || []);
+  if(!m.length) return '';
+  return '<div class="minor"><b>' + m.length + ' other' + (m.length === 1 ? '' : 's') + ' confirmed fewer than ' + REP.minPicks +
+    ' picks</b> and are left out of the ranking: ' +
+    m.map(x => '<span class="who">' + (SELECTED ? '&mdash;' : esc(x.who)) + ' <span class="hint">' + x.total + '</span></span>').join('') + '</div>';
+}
+function tile(label, val, sub, cls){
+  return '<div class="tile" data-mod="kpi-' + (tileN++) + '"><div class="lab">' + label + '</div><div class="val">' + val + '</div><div class="sub ' + (cls || '') + '">' + (sub || '&nbsp;') + '</div></div>';
+}
+
+/* The person under review: their day by day trend and their area mix. */
+function renderDetail(people){
+  if(!SELECTED){ $('detail').innerHTML = ''; return; }
+  const p = people.find(x => x.who === SELECTED);
+  if(!p){ $('detail').innerHTML = ''; return; }
+  const areas = REP.areas.filter(a => p.byArea[a]);
+  const mix = '<table><thead><tr><th>Area</th><th class="n">Picks</th><th class="n">Time</th><th class="n">Per hour</th><th class="n">Standard /h</th><th class="n">Of standard</th></tr></thead><tbody>' +
+    areas.map(a => { const st = (p.areaStat || {})[a] || {};
+      return '<tr><td><i style="display:inline-block;width:11px;height:11px;border-radius:2px;background:' + areaColor[a] + ';margin-right:7px"></i>' + esc(a) + '</td>' +
+      '<td class="n">' + p.byArea[a] + '</td><td class="n">' + (st.hours ? fmtH(st.hours) : '') + '</td>' +
+      '<td class="n">' + (st.rate == null ? '' : st.rate) + '</td>' +
+      '<td class="n">' + (st.target || (REP.targetMap && REP.targetMap[a]) || '') + '</td>' +
+      '<td class="n ' + pctClass(st.pct) + '">' + (st.pct == null ? '' : st.pct + '%') + '</td></tr>'; }).join('') + '</tbody></table>';
+  /* Only what the chart above cannot say: the mix of work behind the number,
+     and how that mix sets their target. The trend lives in the Trend view. */
+  $('detail').innerHTML = '<div class="card" data-mod="detail"><h2>' + esc(p.who) + ' <span>' + p.total + ' picks in ' + fmtH(p.activeHours) +
+      ' &middot; ' + p.rate + ' an hour against a target of ' + p.targetRate + '</span>' +
+      (VIEW === 'trend' ? '' : '<button class="btn small" id="toTrend" style="margin-left:auto">See their trend</button>') +
+      '<button class="btn small" id="clearSel" style="margin-left:' + (VIEW === 'trend' ? 'auto' : '8px') + '">Close</button></h2>' +
+    '<div class="hint" style="margin-bottom:6px">Each area against its own standard. Time is credited to whatever was being picked at the time, so these add up to their active hours.</div>' + mix + '</div>';
+  const tt = $('toTrend');
+  if(tt) tt.onclick = () => setChartView('trend');
+  $('clearSel').onclick = () => select(SELECTED);
+}
+/* kept for reference; the Trend view replaced it */
+function trendChartUnused(pts, target){
+  const W = 520, Hh = 170, padL = 34, padB = 26, padT = 10;
+  const plotW = W - padL - 8, plotH = Hh - padB - padT;
+  const max = Math.max(1, target || 0, ...pts.map(p => p.v));
+  const step = max <= 20 ? 5 : max <= 60 ? 10 : 25;
+  const top = Math.ceil(max / step) * step;
+  const slot = plotW / pts.length, bw = Math.min(24, slot * 0.6);
+  const y = v => padT + plotH - (v / top) * plotH;
+  let s = '<svg viewBox="0 0 ' + W + ' ' + Hh + '" role="img" aria-label="Picks per hour by day">';
+  s += '<g class="grid">';
+  for(let v = 0; v <= top; v += step) s += '<line x1="' + padL + '" x2="' + (W - 8) + '" y1="' + y(v).toFixed(1) + '" y2="' + y(v).toFixed(1) + '"/>';
+  s += '</g><g>';
+  for(let v = 0; v <= top; v += step) s += '<text x="' + (padL - 6) + '" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end">' + v + '</text>';
+  s += '</g>';
+  pts.forEach((p, i) => {
+    const cx = padL + slot * (i + 0.5);
+    const cls = !target ? '' : p.v >= target ? ' over' : p.v >= target * 0.9 ? '' : ' under';
+    s += '<rect class="col' + cls + '" x="' + (cx - bw / 2).toFixed(1) + '" y="' + y(p.v).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + Math.max(0, y(0) - y(p.v)).toFixed(1) + '" rx="3">' +
+      '<title>' + p.d + ': ' + p.v + ' an hour, ' + p.n + ' picks</title></rect>';
+    if(pts.length <= 12 || i % Math.ceil(pts.length / 10) === 0)
+      s += '<text x="' + cx.toFixed(1) + '" y="' + (Hh - 8) + '" text-anchor="middle">' + p.d.slice(5).replace('-', '/') + '</text>';
+  });
+  if(target) s += '<line class="tgt" x1="' + padL + '" x2="' + (W - 8) + '" y1="' + y(target).toFixed(1) + '" y2="' + y(target).toFixed(1) + '"/>' +
+    '<text x="' + (W - 8) + '" y="' + (y(target) - 5).toFixed(1) + '" text-anchor="end" style="font-weight:700">target ' + target + '</text>';
+  s += '<line class="base" x1="' + padL + '" x2="' + (W - 8) + '" y1="' + y(0).toFixed(1) + '" y2="' + y(0).toFixed(1) + '"/></svg>';
+  return s;
+}
+
+function select(who){
+  SELECTED = (SELECTED === who) ? null : who;
+  render();
+}
+$('tableBtn').onclick = () => { SHOWTABLE = !SHOWTABLE; $('tableBtn').textContent = SHOWTABLE ? 'Chart' : 'Table'; render(); };
+document.querySelectorAll('#scope button').forEach(b => b.onclick = () => { SCOPE = b.dataset.scope; RANGE = null; syncState(); load(); });
+document.querySelectorAll('#range button').forEach(b => b.onclick = () => { RANGE = b.dataset.range; SCOPE = null; syncState(); load(); });
+$('rangeShift').onchange = () => { RSHIFT = $('rangeShift').value; if(!SCOPE) load(); };
+document.querySelectorAll('#measure button').forEach(b => b.onclick = () => {
+  MEASURE = b.dataset.measure; syncState();
+  if(MEASURE === 'rate' && BASIS === 'recommended' && !REC) loadRec(true).then(render); else render();
+});
+$('rateBasis').onchange = () => {
+  BASIS = $('rateBasis').value;
+  if(BASIS === 'recommended' && !REC) loadRec(true).then(render); else render();
+};
+document.querySelectorAll('#view button').forEach(b => b.onclick = () => setChartView(b.dataset.view));
+document.querySelectorAll('#sort button').forEach(b => b.onclick = () => { SORT = b.dataset.sort; syncState(); render(); });
+
+/* A control that draws the same chart twice is worse than no control, so the
+   lines measure stays hidden until a line column is actually chosen. */
+function syncLinesBtn(){
+  const b = $('mLines');
+  if(!b) return;
+  const on = REP && !REP.linesAreTasks;
+  b.hidden = !on;
+  if(!on && MEASURE === 'lines'){ MEASURE = 'pct'; syncState(); }
+}
+MODS = H.initModules('pickers', [['kpis'], ['rec'], ['detail']]);
+loadMode(); load().then(loadRec);
+try{ const es = new EventSource('/api/events'); es.addEventListener('data', load); }catch(e){}
+setInterval(load, 60000);
+</script>
+</body>
+</html>

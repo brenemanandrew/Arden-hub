@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Staging Lane Health - Floor</title>
+<link rel="stylesheet" href="/web/board2.css">
+<style>
+  /* Fixed 1920x1080 stage scaled to the screen, so a TV, a kiosk and a
+     laptop all show the same layout. */
+  body{ overflow:hidden; background:var(--plane); }
+  #stage{ width:1920px; height:1080px; transform-origin:top left; display:flex; flex-direction:column; background:var(--plane); }
+  .kpis{ padding:14px 22px 0; }
+  #main.no-side, #main.no-lanes{ grid-template-columns:1fr; }
+  .kpis .tile .val{ font-size:48px; }
+  .kpis .tile{ padding:10px 16px 8px; }
+  #main{ flex:1; display:grid; grid-template-columns:1fr 560px; gap:16px; padding:14px 22px 16px; min-height:0; }
+  #lanes{ min-height:0; display:flex; flex-direction:column; }
+  #lanes .zone{ flex:1; display:flex; flex-direction:column; }
+  #lanes .zone .lrow, #lanes .zone .linerow{ flex:1; }
+  #lanes .zone.line .linerow{ margin-bottom:5px; }
+  #lanes .lane{ min-height:0; }
+  /* rows share the height so every area fits on one screen; with nine
+     columns that lands the cards close to square */
+  #lanes{ overflow:hidden; }
+  #lanes .zone.line .linerow{ flex:1; min-height:0; margin-bottom:4px; }
+  #lanes .zone{ margin-bottom:4px; } #lanes .zone h3{ margin-bottom:4px; }
+  #lanes .lane{ aspect-ratio:auto; }
+  /* deep view: one area, large, with context underneath */
+  #main.deep{ grid-template-columns:1fr 1fr; grid-template-rows:auto 1fr; }
+  #main.deep #lanes{ grid-column:1 / 3; }
+  #main.deep #side{ grid-column:1; }
+  #main.deep #hospCard{ grid-column:2; display:block; }
+  #hospCard{ display:none; }
+  #hospCard .lrow{ grid-auto-columns:minmax(150px, 220px); grid-auto-flow:column; justify-content:start; }
+  body.deep .kpis, body.deep #paceCard{ display:none !important; }
+  body.deep #lanes .lane .bin{ font-size:40px; } body.deep #lanes .lane .age{ font-size:28px; } body.deep #lanes .lane.late.oldest .age{ font-size:46px; }
+  body.deep #lanes .lane .field .fv{ font-size:26px; } body.deep #lanes .lane .field .fl{ font-size:15px; } body.deep #lanes .lane .tag{ font-size:15px; padding:3px 9px; } body.deep #lanes .lane .openword{ font-size:40px; }
+  body.deep #lanes .lane{ padding:14px 14px 12px; aspect-ratio:1 / 0.9; min-height:0; }
+  body.deep #lanes .lrow{ align-items:start; }
+  body.deep #lanes .zone{ flex:0 0 auto; }
+  body.deep #key{ display:none; }
+  body.deep #hospCard .lane{ aspect-ratio:1 / 0.9; }
+  body.deep #hospCard .lane .bin{ font-size:26px; } body.deep #hospCard .lane .age{ font-size:18px; }
+  body.deep #lanes .zone h3{ font-size:16px; }
+  body.deep .rank{ font-size:18px; } body.deep .rank .note{ font-size:14px; } body.deep .stuck .row{ font-size:17px; }
+  .back{ color:var(--amber); text-decoration:none; font-weight:800; font-size:14px; margin-left:10px; }
+  #lanes .lane .bin{ font-size:26px; }
+  #lanes .lane .age{ font-size:20px; }
+  #lanes .lane.late.oldest .age{ font-size:34px; }
+  #lanes .lane .ord{ font-size:17px; }
+  #lanes .lane .openword{ font-size:26px; }
+  #lanes .lane .field .fv{ font-size:17px; } #lanes .lane .field .fl{ font-size:12px; }
+  /* line layout: more lanes per row, so the type steps down a size */
+  body.line #lanes .lane .bin{ font-size:22px; } body.line #lanes .lane .age{ font-size:16px; } body.line #lanes .lane.late.oldest .age{ font-size:28px; } body.line #lanes .lane .openword{ font-size:20px; }
+  body.line #lanes .lane .field .fv{ font-size:15px; padding:1px 5px; } body.line #lanes .lane .field .fl{ font-size:11px; }
+  body.line #lanes .lane{ min-height:0; padding:6px 8px 5px; } body.line #lanes .lane .field{ margin-top:1px; } body.line #lanes .lane .tag{ margin-top:auto; }
+  body.line #lanes .lane .tag{ font-size:9px; padding:0 4px; }
+  body.line #lanes .lane{ padding:5px 7px 4px; gap:1px; }
+  body.line #lanes .zone.line .lrow{ position:relative; }
+  #hosp{ flex:0 0 auto !important; margin-top:4px; }
+  #hosp .lrow{ grid-auto-columns:150px; }
+  #hosp .lane{ min-height:60px; padding:5px 8px 4px; } #hosp .lane .bin{ font-size:20px; } #hosp .lane .age{ font-size:15px; } #hosp .lane .field{ display:none; }
+  #side{ display:flex; flex-direction:column; gap:12px; min-height:0; }
+  #side .card, #side .zone{ min-height:0; overflow:hidden; }
+  #clear{ flex:1.15; } #stuck{ flex:1; } #paceCard{ flex:0 0 auto; }
+  #pace{ display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:center; }
+  #pace .big{ font-size:44px; font-weight:600; line-height:1; }
+  #pace .big small{ font-size:16px; color:var(--ink-2); font-weight:500; display:block; margin-top:4px; }
+  .rank{ font-size:16px; } .rank .note{ font-size:13px; }
+  .stuck .row{ font-size:15px; }
+  body.zoom #lanes .lane .age{ font-size:30px; } body.zoom #lanes .lane.late.oldest .age{ font-size:44px; }
+  body.zoom #lanes .lane .bin{ font-size:36px; } body.zoom #lanes .lane .ord{ font-size:22px; } body.zoom #lanes .lane .ord2{ font-size:14px; } body.zoom #lanes .lane .tag{ font-size:13px; }
+  /* a banner, never a wall: the last good board stays visible and clickable */
+  #offline{ display:none; position:absolute; left:50%; top:70px; transform:translateX(-50%); background:var(--crit); color:#fff; font-size:20px; font-weight:800; padding:10px 22px; border-radius:8px; pointer-events:none; z-index:30; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+  body.offline #offline{ display:block; }
+  body.offline #stage > :not(#offline){ opacity:.6; }
+  .bar .btn{ font-size:12px; }
+  #key{ display:flex; gap:14px; align-items:center; font-size:12px; color:#c3c2b7; margin-left:6px; }
+  .bar nav a{ font-size:13px; margin-left:12px; }
+  #key i{ display:inline-block; width:14px; height:14px; border-radius:3px; margin-right:5px; vertical-align:-3px; }
+  #key .k-open i{ border:2px dashed var(--open-ink); }
+  #key .k-fresh i{ background:var(--fresh); } #key .k-aging i{ background:var(--warn); } #key .k-late i{ background:var(--crit); }
+  #key .k-exc i{ background:var(--crit); outline:2px solid var(--amber); outline-offset:-2px; }
+</style>
+</head>
+<body class="dark" data-default-dark>
+<div id="stage">
+  <div class="bar" data-page="tv" data-tools="reset,layout,mode" data-feed data-clock data-key></div>
+  <div class="dock" id="dock"></div>
+  <div class="tiles kpis" id="kpis"></div>
+  <div id="main">
+    <div id="lanes"></div>
+    <div id="side">
+      <div class="card" id="clear" data-mod="clear"><h2>Clear next <span>oldest first</span></h2><div id="clearBody"></div></div>
+      <div class="card" id="stuck" data-mod="stuck"><h2>Exceptions <span>needs a person</span></h2><div id="stuckBody"></div></div>
+      <div class="card" id="paceCard" data-mod="pace"><h2>Today's pace <span id="paceSub"></span></h2><div id="pace"></div></div>
+    </div>
+    <div class="card" id="hospCard" data-mod="hospcard"><h2>Problem solve <span id="hospSub"></span></h2><div id="hospBody"></div></div>
+  </div>
+  <div id="offline">Service not reachable. Showing the last data received.</div>
+</div>
+<script src="/web/theme.js"></script>
+<script src="/web/board2.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const H = window.SLH;
+const q = new URLSearchParams(location.search);
+const ZONE = (q.get('zone') || '').toLowerCase();
+const AREA = (q.get('area') || '').toUpperCase();
+if(AREA){ document.body.classList.add('deep', 'zoom'); $('main').classList.add('deep'); }
+function fit(){ const st = $('stage'); const k = Math.min(innerWidth / 1920, innerHeight / 1080); st.style.transform = 'translate(' + Math.max(0, (innerWidth - 1920 * k) / 2) + 'px,' + Math.max(0, (innerHeight - 1080 * k) / 2) + 'px) scale(' + k + ')'; }
+addEventListener('resize', fit); fit();
+setInterval(() => { $('clock').textContent = H.fmtClock(); }, 1000); $('clock').textContent = H.fmtClock();
+const mods = H.initModules('tv' + (ZONE ? '-' + ZONE : '') + (AREA ? '-' + AREA : ''), [['kpis'], ['lanes', 'side']], () => {
+  const vis = sel => [...document.querySelectorAll(sel)].some(n => !n.classList.contains('docked'));
+  $('main').classList.toggle('no-side', !vis('#side > [data-mod]'));
+  $('main').classList.toggle('no-lanes', !vis('#lanes > [data-mod]'));
+});
+H.initModeBtn();
+H.initLayoutBtn();
+
+function tile(id, label, val, sub, subCls, meterPct, meterCls, extraCls){
+  return '<div class="tile ' + (extraCls || '') + '" data-mod="' + id + '"><div class="lab">' + label + '</div><div class="val">' + val + '</div><div class="sub ' + (subCls || '') + '">' + (sub || '&nbsp;') + '</div>' +
+    (meterPct == null ? '' : '<div class="meter ' + (meterCls || '') + '"><i style="width:' + Math.max(0, Math.min(100, meterPct)).toFixed(0) + '%"></i></div>') + '</div>';
+}
+window.renderBoard = function(m){
+  const s = m.summary, p = m.pace, f = H.feedState(m.feed), t = m.thresholds;
+  $('title').innerHTML = H.esc(m.title).replace(/health/i, '<b>$&</b>');
+  $('feed').className = 'feed ' + f.cls; $('feedText').innerHTML = H.esc(f.text) + (m.feed.testMode ? ' <span class="test">TEST ' + H.esc(m.feed.testMode) + '</span>' : '');
+  $('key').innerHTML = '<span class="k-open"><i></i>open</span><span class="k-fresh"><i></i>under ' + Math.round(t.yellowMin / 60 * 10) / 10 + ' h</span><span class="k-aging"><i></i>' + Math.round(t.yellowMin / 60 * 10) / 10 + '&ndash;' + Math.round(t.redMin / 60 * 10) / 10 + ' h</span><span class="k-late"><i></i>over ' + Math.round(t.redMin / 60 * 10) / 10 + ' h</span><span class="k-exc"><i></i>exception</span>';
+  const byBin = {}; m.lanes.concat(m.hospital).forEach(l => { byBin[l.bin] = l; });
+  const zones = ZONE ? m.zones.filter(z => z.id === ZONE) : m.zones;
+  document.body.classList.toggle('zoom', (!!ZONE && zones.length === 1) || !!AREA);
+  $('zoneName').innerHTML = AREA ? ('Area ' + H.esc(AREA) + ' <a class="back" href="/tv">all lanes &rarr;</a>') : (ZONE && zones[0] ? 'Zone ' + zones[0].label : '');
+  // the tiles: open lanes, oldest, ready, exceptions
+  const oldest = s.oldest, ex = s.exceptions || { total: 0 };
+  const exParts = [];
+  if(ex.loose) exParts.push(ex.loose + ' loose tote' + (ex.loose > 1 ? 's' : ''));
+  if(ex.split) exParts.push(ex.split + ' split');
+  if(ex.unknown) exParts.push(ex.unknown + ' not on report');
+  if(ex.hospital) exParts.push(ex.hospital + ' in problem solve');
+  if(ex.overdue) exParts.push(ex.overdue + ' overdue picks');
+  $('kpis').innerHTML =
+    tile('t-open', 'Open lanes', s.openLanes, s.lanesUsed + ' of ' + s.lanesTotal + ' in use' + (s.hospitalTotes ? ' &middot; ' + s.hospitalTotes + ' in problem solve' : ''), '', s.occupancyPct, s.occupancyPct >= 85 ? 'crit' : s.occupancyPct >= 65 ? 'warn' : 'good', 'open-tile') +
+    tile('t-oldest', 'Oldest staged', oldest ? oldest.age : '&ndash;', oldest ? (oldest.lane + (oldest.doc ? ' &middot; ' + oldest.doc : '') + (oldest.ready ? ' &middot; ready to ship' : '')) : 'nothing staged', oldest && oldest.ageMin >= t.redMin ? 'bad' : '', null, null, oldest && oldest.ageMin >= t.redMin ? 'alert' : '') +
+    tile('t-ready', 'Ready to ship', s.ready, 'every line picked' + (s.late ? ' &middot; <b>' + s.late + ' past ' + Math.round(t.lateMin / 60) + ' h</b>' : ''), s.late ? 'bad' : 'good') +
+    tile('t-exc', 'Exceptions', ex.total, exParts.join(' &middot; ') || 'nothing needs a person', ex.total ? 'bad' : 'good', null, null, ex.total ? 'alert' : '');
+  // lanes
+  const oldestBin = oldest ? oldest.lane : null;
+  document.body.classList.toggle('line', !ZONE && !AREA && H.laneLayout() === 'line');
+  let html;
+  if(AREA){
+    // deep view: this area's lanes, large, in floor order
+    const inArea = m.lanes.filter(l => l.zone === AREA);
+    const open = inArea.filter(l => !l.totes).length, lateN = inArea.filter(l => l.band === 'late').length;
+    html = '<div class="zone line" data-mod="zone-area"><h3>' + H.esc(AREA) + ' <span>' + open + ' open</span> ' + (lateN ? '<span class="late">' + lateN + ' late</span>' : '') + '</h3>' +
+      '<div class="lrow" style="grid-template-columns:repeat(' + Math.max(1, inArea.length) + ',1fr)">' + inArea.map(l => H.laneCard(l, oldestBin)).join('') + '</div></div>';
+    $('hospSub').textContent = s.hospitalTotes + ' tote' + (s.hospitalTotes === 1 ? '' : 's');
+    $('hospBody').innerHTML = m.hospital.length ? '<div class="lrow">' + m.hospital.map(l => H.laneCard(l, null)).join('') + '</div>' : '<div class="empty-note">No problem solve lanes configured.</div>';
+  } else {
+    html = (!ZONE && H.laneLayout() === 'line') ? H.lineBlock(m, byBin, oldestBin) : zones.map(z => H.zoneBlock(z, byBin, oldestBin)).join('');
+    if(m.hospital.length && !ZONE) html += '<div class="zone" id="hosp" data-mod="hosp"><h3>Problem solve <span style="color:var(--ink-2)">' + s.hospitalTotes + ' tote' + (s.hospitalTotes === 1 ? '' : 's') + '</span></h3><div class="lrow">' + m.hospital.map(l => H.laneCard(l, null)).join('') + '</div></div>';
+  }
+  $('lanes').innerHTML = html;
+  // side: scoped to the area or zone on a focused screen
+  const inScope = b => AREA ? (byBin[b] && byBin[b].zone === AREA) : (ZONE && zones[0] ? zones[0].rows.some(r => r.indexOf(b) >= 0) : true);
+  const cn = m.clearNext.filter(x => inScope(x.bin));
+  $('clearBody').innerHTML = cn.length ? H.rankList(cn.map(x => Object.assign({ toteIds: (byBin[x.bin] || {}).toteIds }, x)).slice(0, 8)) : '<div class="empty-note">Nothing staged in ' + H.esc(AREA || (zones[0] ? zones[0].label : '')) + '.</div>';
+  const st = m.stuck.filter(x => inScope(x.lane));
+  $('stuckBody').innerHTML = st.length ? H.stuckList(st, 6) : ('<div class="empty-note">Nothing stuck here' + (m.stuck.length && (AREA || ZONE) ? ' &middot; ' + m.stuck.length + ' elsewhere' : '') + '.</div>');
+  const goalTxt = p.goal ? ('goal ' + p.goal) : 'no goal set';
+  $('paceSub').textContent = p.shift ? (p.shift.name + ' shift, ' + p.hoursLeft + ' h left') : 'no shift running';
+  $('pace').innerHTML = '<div class="big">' + p.ordersClearedToday + '<small>orders cleared today' + (p.goal ? ', ' + goalTxt : '') + '</small>' +
+    (!p.ordersClearedToday ? '<small>no clears logged yet today</small>'
+      : p.projected != null ? '<small>on track for ' + p.projected + (p.onPace == null ? '' : p.onPace ? ' &#10003;' : ', behind') + '</small>'
+      : '<small>' + (p.ordersClearedYesterday ? p.ordersClearedYesterday + ' yesterday' : '') + '</small>') + '</div>' +
+    '<div class="chart">' + H.paceChart(p, { width: 360, height: 120 }) + '<div class="legend"><span class="t"><i></i>today</span><span class="y"><i></i>yesterday</span></div></div>';
+  mods.apply();
+};
+window.renderOffline = function(){ $('feed').className = 'feed bad'; $('feedText').textContent = 'service not reachable'; };
+H.connect();
+</script>
+</body>
+</html>

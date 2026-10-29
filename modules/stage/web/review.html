@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Staging Lane Health - Performance review</title>
+<link rel="stylesheet" href="/web/board2.css">
+<style>
+  .rhead{ display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin:0 0 16px; }
+  .rhead h1{ margin:0; font-size:30px; letter-spacing:.3px; }
+  .rhead .sub{ color:var(--ink-2); font-size:14px; padding-bottom:4px; }
+  .rhead .sp{ margin-left:auto; display:flex; gap:8px; align-items:center; }
+  .who-pick{ display:flex; gap:8px; align-items:center; margin:0 0 18px; font-size:13px; color:var(--ink-2); }
+  .who-pick input{ font:inherit; padding:5px 9px; border:1px solid var(--hair); border-radius:7px;
+                   background:var(--tile); color:var(--ink); min-width:220px; }
+
+  section.rs{ margin:0 0 22px; }
+  section.rs > h2{ font-size:13px; text-transform:uppercase; letter-spacing:.09em; color:var(--muted);
+                   margin:0 0 9px; font-weight:700; }
+  section.rs > h2 span{ text-transform:none; letter-spacing:0; font-weight:400; color:var(--muted); margin-left:9px; }
+
+  /* the four windows, read left to right as a trend */
+  .wins{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  .win{ background:var(--tile); border:1px solid var(--hair); border-radius:11px; padding:12px 14px;
+        cursor:pointer; text-align:left; font:inherit; color:inherit; position:relative; }
+  .win:hover{ border-color:var(--axis); }
+  .win.on{ border-color:var(--blue); box-shadow:0 0 0 2px var(--blue-soft); }
+  .win .n{ font-size:12px; color:var(--muted); }
+  .win .v{ font-size:30px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1.15; }
+  .win .m{ font-size:11.5px; color:var(--ink-2); }
+  .win.none .v{ color:var(--muted); font-weight:400; font-size:20px; }
+  /* A window with fewer days in it than it asked for is not that window.
+     Four cards reading the same number because there are only three days
+     between them looks like four weeks of steady work at a glance, which
+     is the one misreading this page cannot afford. */
+  .win.short{ background:repeating-linear-gradient(135deg, transparent 0 7px, var(--plane) 7px 14px); }
+  .win.short .v{ opacity:.55; font-weight:700; }
+  .win.short .n{ color:var(--serious); font-weight:600; }
+
+  .gauges{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .g{ background:var(--tile); border:1px solid var(--hair); border-radius:11px; padding:14px 16px; }
+  .g .t{ font-size:12px; color:var(--muted); font-weight:600; }
+  .g .v{ font-size:34px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1.2; }
+  .g .d{ font-size:12.5px; color:var(--ink-2); }
+  .track{ position:relative; height:9px; border-radius:5px; background:var(--plane); margin:9px 0 7px; overflow:hidden; }
+  .track i{ position:absolute; left:0; top:0; bottom:0; border-radius:5px; }
+  .track b{ position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--ink); opacity:.55; }
+
+  /* The crew, anonymous, as a ranked bar each. Dots on a line were a
+     puzzle at six people and a smear at forty: nobody could tell what one
+     dot was, and a sparse row read as missing data rather than as a small
+     crew. One bar per picker, tallest first, this person in blue - where
+     they sit is then the shape of the thing rather than a number to find. */
+  .distrow{ background:var(--tile); border:1px solid var(--hair); border-radius:11px; padding:12px 16px 14px; margin-bottom:9px; }
+  .distrow .cap{ display:flex; gap:10px; align-items:baseline; font-size:12.5px; margin-bottom:16px; }
+  .distrow .cap b{ font-size:14px; }
+  .distrow .cap .r{ margin-left:auto; color:var(--ink-2); white-space:nowrap; }
+  .crew{ position:relative; display:flex; align-items:flex-end; gap:3px; height:92px; }
+  .cb{ flex:1 1 0; min-width:0; height:100%; display:flex; flex-direction:column;
+       justify-content:flex-end; position:relative; }
+  .cb i{ display:block; background:var(--axis); border-radius:2px 2px 0 0; }
+  .cb.me i{ background:var(--blue); }
+  .cb em{ position:absolute; left:50%; transform:translateX(-50%); white-space:nowrap;
+          font-style:normal; font-size:11.5px; font-weight:800; color:var(--blue); }
+  .crewline{ position:absolute; left:0; right:0; border-top:1px dashed var(--ink-2); opacity:.55; }
+  .crewline span{ position:absolute; right:0; top:-14px; font-size:10.5px; color:var(--ink-2); }
+  /* the standard, on the chart whose unit is the standard. Both lines at
+     once is the whole argument of this page in one picture: the bar is
+     where the standard is, the average is only where everyone happens to
+     be. Labelled left so the two never collide. */
+  .crewstd{ position:absolute; left:0; right:0; border-top:2px solid var(--ink); opacity:.45; }
+  .crewstd span{ position:absolute; left:0; top:-14px; font-size:10.5px; font-weight:600; color:var(--ink-2); }
+  .crewfoot{ display:flex; justify-content:space-between; font-size:10.5px; color:var(--muted); margin-top:5px; }
+
+  /* Direction: every day of the chosen window as a line, with the line of
+     best fit through it. Two bars said which half was higher; a supervisor
+     wants to see the shape - one bad Tuesday and an otherwise flat run look
+     nothing like a slide, and read identically as two averages. */
+  .dirplot{ width:100%; height:auto; display:block; overflow:visible; }
+  .dirplot .grid{ stroke:var(--hair); stroke-width:1; }
+  .dirplot .std{ stroke:var(--ink-2); stroke-width:1.5; stroke-dasharray:4 4; opacity:.55; }
+  .dirplot .ln{ fill:none; stroke:var(--blue); stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
+  .dirplot .dot{ fill:var(--blue); }
+  .dirplot .fit{ fill:none; stroke-width:2.5; stroke-dasharray:7 5; stroke-linecap:round; opacity:.9; }
+  .dirplot text{ font-size:10.5px; fill:var(--muted); }
+  .dirplot text.ax{ font-size:10px; }
+  .dirhead{ display:flex; align-items:center; gap:12px; margin-bottom:6px; }
+  .dirdelta{ font-size:15px; font-weight:800; padding:4px 11px;
+             border-radius:20px; background:var(--plane); white-space:nowrap; }
+  .dirlegend{ display:flex; gap:16px; font-size:11px; color:var(--muted); margin-top:7px; }
+  .dirlegend i{ display:inline-block; width:14px; height:0; border-top:2px solid var(--blue);
+                vertical-align:middle; margin-right:5px; }
+  .dirlegend i.f{ border-top-style:dashed; border-top-color:var(--ink-2); }
+  .dirlegend i.s{ border-top-style:dashed; border-top-color:var(--ink-2); opacity:.55; }
+
+  table.rt{ width:100%; border-collapse:collapse; font-size:13.5px; background:var(--tile); }
+  table.rt th, table.rt td{ border-bottom:1px solid var(--hair); padding:7px 10px; text-align:left; }
+  table.rt th{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+  table.rt td.num, table.rt th.num{ text-align:right; font-variant-numeric:tabular-nums; }
+  table.rt tr:last-child td{ border-bottom:0; }
+  .rtwrap{ overflow-x:auto; }
+  /* the drawn bar repeats the percentage beside it, so on a narrow screen
+     it is the first thing that can go rather than a number */
+  @media (max-width:620px){ table.rt th.rtbar, table.rt td.rtbar{ display:none; } }
+  .minibar{ position:relative; height:7px; width:100%; min-width:70px; background:var(--plane); border-radius:4px; }
+  .minibar i{ position:absolute; left:0; top:0; bottom:0; border-radius:4px; }
+  .minibar b{ position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--ink); opacity:.45; }
+  /* too few picks, or too little time, to call a rate at all */
+  table.rt tr.thin td{ color:var(--muted); }
+  table.rt tr.thin td b{ font-weight:600; }
+  .rtnote{ font-size:11.5px; color:var(--muted); margin-top:7px; }
+
+  .days{ display:flex; align-items:flex-end; gap:4px; height:150px; padding:16px 0 0;
+         border-bottom:1px solid var(--axis); position:relative; }
+  .days .std{ position:absolute; left:0; right:0; border-top:1px dashed var(--ink-2); opacity:.55; }
+  .days .std span{ position:absolute; right:0; top:-15px; font-size:10.5px; color:var(--ink-2); }
+  .day{ flex:1 1 0; display:flex; flex-direction:column; justify-content:flex-end; height:100%; min-width:0; }
+  .day i{ display:block; border-radius:3px 3px 0 0; }
+  .day em{ font-style:normal; font-size:10px; text-align:center; color:var(--ink-2);
+           font-variant-numeric:tabular-nums; margin-bottom:2px; }
+  /* what the standard asked of that day, drawn across the bar it belongs to */
+  .day{ position:relative; }
+  .day b.want{ position:absolute; left:4%; right:4%; height:0;
+               border-top:2px dashed var(--ink); opacity:.55; z-index:2; }
+  .days .full{ position:absolute; left:0; right:0; border-top:1px solid var(--ink-2); opacity:.4; }
+  .days .full span{ position:absolute; right:0; top:-15px; font-size:10.5px; color:var(--ink-2); }
+  .dayfoot{ font-size:11.5px; color:var(--muted); margin-top:9px; }
+  /* the floor's pace, laid over the same days. A thin line rather than a
+     mark per bar: it reads as one thing - everyone else - instead of ten. */
+  .days svg.crewline-day{ position:absolute; left:0; right:0; top:0; bottom:0;
+                          width:100%; height:100%; overflow:visible; pointer-events:none; z-index:3; }
+  .days svg.crewline-day path{ fill:none; stroke:var(--blue); stroke-width:2;
+                               stroke-linejoin:round; stroke-linecap:round; opacity:.85; }
+  .days svg.crewline-day circle{ fill:var(--blue); opacity:.9; }
+  /* a day outside this person's own ordinary range: the only days with a
+     reason in them, so the only ones worth a ring */
+  .day.flag i{ outline:2px solid var(--ink); outline-offset:2px; }
+  .day.flag em{ font-weight:800; }
+  .daykey{ display:flex; gap:18px; font-size:11px; color:var(--muted); margin-top:8px; flex-wrap:wrap; }
+  .daykey i{ display:inline-block; width:14px; vertical-align:middle; margin-right:5px; }
+  .daykey i.crew{ border-top:2px solid var(--blue); }
+  .daykey i.want{ border-top:2px dashed var(--ink); opacity:.6; }
+  .daykey i.ring{ border:2px solid var(--ink); height:9px; border-radius:2px; }
+  .daylabs{ display:flex; gap:4px; margin-top:5px; }
+  .daylabs div{ flex:1 1 0; text-align:center; font-size:10px; color:var(--muted); min-width:0;
+                overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  /* Where the paid hours went: one bar, four parts, biggest first. */
+  .split{ display:flex; height:30px; border-radius:7px; overflow:hidden; background:var(--plane); }
+  .split i{ display:block; height:100%; position:relative; }
+  .split i.pick{ background:var(--good); }
+  .split i.oth{ background:var(--blue); }
+  .split i.down{ background:var(--crit); }
+  .split i.allow{ background:var(--warn); }
+  /* measured work past the paid shift: hatched, because it is the one part
+     of the bar that should not be there */
+  .split i.over{ background:repeating-linear-gradient(135deg, var(--serious) 0 6px, rgba(0,0,0,.18) 6px 12px); }
+  .splitkey i.over{ background:var(--serious); }
+  .split{ position:relative; }
+  .split b.paidmark{ position:absolute; top:-3px; bottom:-3px; width:3px; background:var(--ink); z-index:2; }
+  .split b.paidmark:after{ content:""; position:absolute; left:3px; top:3px; bottom:3px; width:1px; background:#fff; opacity:.6; }
+  .overline{ margin-top:11px; font-size:13px; border-left:3px solid var(--serious);
+             padding:3px 0 3px 11px; }
+  .splitkey{ display:flex; flex-wrap:wrap; gap:4px 20px; margin-top:11px; font-size:12.5px; }
+  .splitkey div{ display:flex; align-items:baseline; gap:7px; }
+  .splitkey i{ width:11px; height:11px; border-radius:3px; flex:0 0 auto; align-self:center; }
+  .splitkey b{ font-variant-numeric:tabular-nums; font-size:14px; }
+  .splitkey span{ color:var(--muted); }
+  .instead{ margin-top:12px; font-size:13px; }
+  .instead b{ font-variant-numeric:tabular-nums; }
+  .instead .codes{ color:var(--ink-2); }
+  .notes{ background:var(--tile); border:1px solid var(--hair); border-left:3px solid var(--warn);
+          border-radius:9px; padding:11px 14px; font-size:13px; }
+  .notes li{ margin:3px 0; }
+  .notes ul{ margin:0; padding-left:18px; }
+  .sign{ display:none; }
+  .empty{ padding:40px 0; color:var(--muted); }
+
+  .good{ color:var(--good); } .warn{ color:var(--serious); } .bad{ color:var(--crit); }
+  .bgood{ background:var(--good); } .bwarn{ background:var(--serious); } .bbad{ background:var(--crit); }
+
+  @media (max-width:860px){
+    .wins{ grid-template-columns:1fr 1fr; }
+    .gauges{ grid-template-columns:1fr; }
+  }
+  @media print{
+    .bar, .who-pick, .rhead .sp, .noprint{ display:none !important; }
+    body{ background:#fff; }
+    .wrap{ padding:0; max-width:none; }
+    /* A sheet of letter paper is narrower than the width at which this
+       page stacks, so without saying otherwise a review prints stacked
+       over two pages. It is meant to be one, in front of two people. */
+    .gauges{ grid-template-columns:repeat(3,1fr) !important; }
+    .wins{ grid-template-columns:repeat(4,1fr) !important; }
+    .g .v, .win .v{ font-size:25px; }
+    .rhead h1{ font-size:24px; }
+    /* On paper the two crew charts sit side by side and everything that is
+       a bar gets shorter. A review is read next to the person it is about,
+       and a second sheet with nothing on it but the signature line is a
+       second sheet nobody keeps. */
+    .crewsec{ display:grid; grid-template-columns:1fr 1fr; gap:9px; }
+    .crewsec > h2{ grid-column:1/-1; }
+    .crewsec .distrow{ margin-bottom:0; }
+    .crew{ height:58px; }
+    .dir{ height:68px; }
+    .distrow .cap{ margin-bottom:14px; }
+    .days{ height:76px; }
+    section.rs{ margin-bottom:8px; }
+    section.rs > h2{ margin-bottom:5px; }
+    .rhead{ margin-bottom:8px; }
+    .g, .win, .distrow{ padding:8px 11px; }
+    .hint{ font-size:10px; }
+    .sign{ margin-top:14px; }
+    /* The review runs to two sheets now that it says where the shift
+       went. Two is fine for something that gets signed; a section cut
+       in half across the break is not, so none of them are. */
+    section.rs{ break-inside:avoid; margin-bottom:14px; }
+    .distrow, table.rt, .notes, .splitkey, .sign{ break-inside:avoid; }
+    section.rs > h2{ break-after:avoid; }
+    .sign{ break-before:avoid; }
+    .win, .g, .distrow, table.rt, .notes{ border-color:#bbb; }
+    .sign{ display:block; margin-top:26px; padding-top:10px; border-top:1px solid #bbb;
+           font-size:12px; color:#333; display:flex; gap:40px; }
+    .sign div{ flex:1; }
+    .sign u{ display:block; border-bottom:1px solid #777; height:26px; text-decoration:none; }
+  }
+</style>
+</head>
+<body>
+<div class="bar" data-page="review" data-sub="Performance review"></div>
+<main class="wrap">
+  <div id="app"><div class="empty">Loading…</div></div>
+</main>
+<script src="/web/theme.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const q = new URLSearchParams(location.search);
+let WHO = (q.get('who') || '').trim().toUpperCase();
+let DAYS = parseInt(q.get('days'), 10) || 10;
+const SHIFT = q.get('shift');          // absent = let the server work it out
+
+const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const fmtH = h => h == null ? '–' : (h >= 10 ? Math.round(h) : Math.round(h * 10) / 10) + ' h';
+function fmtDay(k){
+  if(!k) return '';
+  const d = new Date(k + 'T12:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+function fmtFull(k){
+  if(!k) return '';
+  return new Date(k + 'T12:00:00').toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' });
+}
+/* One scale for every verdict on the page, so a colour means the same thing
+   in the gauges, the table and the day chart. */
+let BANDS = { good: 100, warn: 85 };      // until the payload says otherwise
+function band(pct){ return pct == null ? '' : pct >= BANDS.good ? 'good' : pct >= BANDS.warn ? 'warn' : 'bad'; }
+
+/* ---------- pieces ---------- */
+
+function winCard(w, on){
+  if(!w.has) return '<button class="win none" data-n="' + w.n + '"><div class="n">' + w.n + ' days</div>' +
+    '<div class="v">–</div><div class="m">no records</div></button>';
+  return '<button class="win' + (on ? ' on' : '') + (w.full ? '' : ' short') + '" data-n="' + w.n + '">' +
+    '<div class="n">' + (w.full ? w.n + ' worked days' : w.days + ' days only, not ' + w.n) + '</div>' +
+    '<div class="v ' + band(w.pct) + '">' + (w.pct == null ? '–' : w.pct + '%') + '</div>' +
+    '<div class="m">' + w.rate + '/h · ' + fmtDay(w.from) + ' – ' + fmtDay(w.to) + '</div></button>';
+}
+
+/* a bar that fills to `pct` of the way to `full`, with a mark at `mark` */
+function track(pct, full, mark){
+  const w = Math.max(0, Math.min(100, (pct || 0) / full * 100));
+  const m = mark == null ? '' : '<b style="left:' + Math.min(100, mark / full * 100) + '%"></b>';
+  return '<div class="track"><i class="b' + band(pct) + '" style="width:' + w + '%"></i>' + m + '</div>';
+}
+
+/* 4:30 reads better than 4.5 h for a piece of somebody's shift, and it is
+   what the People page uses for the same numbers. */
+const fmtHM = h => { const m = Math.max(0, Math.round((h || 0) * 60)); return Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0'); };
+
+/* SAP's own activity codes, in whatever words the picker page says. A code
+   nobody has named shows as the code - better than a guess on a page
+   somebody is reviewed against. */
+let ACT = {};
+const actName = k => ACT[k] || k;
+
+/* The shift is bought whole and only some of it can ever be picking. What is
+   left after picking, the break allowance, and whatever else they confirmed
+   is the part nothing accounts for - the figure this section exists for. */
+function shiftSection(P){
+  ACT = P.acts || ACT;
+  const s = P.period.shift;
+  if(!s || !s.perDay) return '';
+  const d = s.perDay;
+  /* the bar is as wide as the day actually was, which is the paid shift
+     unless the measured work ran past it */
+  const span = Math.max(d.paid || 1, (d.allowance || 0) + (d.picking || 0) + (d.other || 0));
+  const pc = v => (Math.max(0, v) / span * 100);
+  const seg = (v, cls) => pc(v) < 0.4 ? '' : '<i class="' + cls + '" style="width:' + pc(v).toFixed(2) + '%"></i>';
+  const key = (cls, v, lab, note) => '<div><i class="' + cls + '"></i><b>' + fmtHM(v) + '</b> ' + lab +
+    (note ? ' <span>' + note + '</span>' : '') + '</div>';
+  const o = P.period.other || {};
+  const codes = Object.keys(o).sort((a, b) => o[b] - o[a]);
+  return '<section class="rs"><h2>Where the shift went ' +
+      '<span>an average day of the ' + (P.shiftHours || 8) + ' paid hours</span></h2>' +
+    '<div class="distrow">' +
+      '<div class="split">' + seg(d.picking, 'pick') + seg(d.other, 'oth') + seg(d.down, 'down') + seg(d.allowance, 'allow') +
+        (d.over > 0 ? '<b class="paidmark" style="left:' + pc(d.paid).toFixed(2) + '%" title="the ' + fmtHM(d.paid) + ' they are paid for"></b>' : '') +
+      '</div>' +
+      '<div class="splitkey">' +
+        key('pick', d.picking, 'picking') +
+        (d.other > 0 ? key('oth', d.other, 'other warehouse work') : '') +
+        key('down', d.down, 'unaccounted for') +
+        key('allow', d.allowance, 'breaks &amp; setup', 'allowed for') +
+        (d.over > 0 ? key('over', d.over, 'past the paid shift') : '') +
+      '</div>' +
+      (d.over > 0
+        ? '<div class="overline">The work measured under this name comes to <b>' +
+            fmtHM(d.picking + d.other + d.allowance) + ' a day</b>, against a paid shift of <b>' + fmtHM(d.paid) +
+            '</b>. Either they are working past it, or the shift\u2019s picking hours are set too low ' +
+            'for this floor \u2014 both are worth knowing, and neither is a fault of theirs.</div>'
+        : '') +
+      (codes.length
+        ? '<div class="instead">What the other work was, over ' + P.period.days + ' day' + (P.period.days === 1 ? '' : 's') + ': ' +
+            codes.map(k => '<b>' + o[k].toLocaleString() + '</b> ' + actName(k)).join(', ') + '.' +
+            (codes.some(k => !ACT[k])
+              ? ' <span class="codes">A code with no name is SAP\u2019s own \u2014 it can be named on the picker page.</span>'
+              : '') + '</div>'
+        : '<div class="instead"><span class="codes">' +
+            (P.period.preCapture >= P.period.days
+              ? 'These days were recorded before the app began keeping work that was not picking, so what '
+                + 'the unaccounted time went on is not known for them. It fills in from here.'
+              : P.period.preCapture > 0
+                ? P.period.preCapture + ' of these ' + P.period.days + ' days were recorded before the app began '
+                  + 'keeping work that was not picking; on the rest, nothing but picking was confirmed.'
+                : 'Nothing but picking was confirmed under this name in these days.') +
+          '</span></div>') +
+      '<p class="hint" style="margin-top:10px">Paid hours are the shift length times the days they picked \u2014 ' +
+        'nothing here can see a clock-in, so this is the one figure on the page that is assumed rather than ' +
+        'measured. Picking and other work are measured; what is left is what neither accounts for.</p>' +
+    '</div></section>';
+}
+
+/* Three numbers, in the order a supervisor needs them: how fast, how much
+   of the shift, how much came out. The third is the only one on the page
+   with no assumption in it - no standard, no active-time rule, no 6.5 - so
+   it is the one that cannot be argued with, and it carries its own hours
+   beside it because a total without its hours invites the worst comparison
+   on the page. */
+function gauges(P){
+  const per = P.period;
+  const prodBand = per.prod == null ? '' : per.prod >= P.prodFloor ? 'good' : per.prod >= P.prodFloor - 15 ? 'warn' : 'bad';
+  const perDay = per.days ? Math.round(per.picks / per.days) : 0;
+  return '<div class="gauges">' +
+    '<div class="g"><div class="t">vs KPI</div>' +
+      '<div class="v ' + band(per.pct) + '">' + (per.pct == null ? '–' : per.pct + '%') + '</div>' +
+      track(per.pct, 130, 100) +
+      '<div class="d">' + per.rate + ' picks an hour, against <b>' + per.targetRate + '</b> for this mix of work. ' +
+        'Green from ' + (P.bands ? P.bands.good : 100) + '%.</div></div>' +
+    '<div class="g"><div class="t">Productivity</div>' +
+      '<div class="v ' + prodBand + '">' + (per.prod == null ? '–' : per.prod + '%') + '</div>' +
+      track(per.prod, 110, P.prodFloor) +
+      '<div class="d">' + fmtH(per.hours) + ' picking across ' + per.days + ' days, of ' +
+        fmtH(per.days * P.dayHours) + ' the shift allows. Green from ' + P.prodFloor + '%.</div></div>' +
+    '<div class="g"><div class="t">Total picks</div>' +
+      '<div class="v">' + per.picks.toLocaleString() + '</div>' +
+      '<div class="d" style="margin-top:9px"><b>' + perDay.toLocaleString() + '</b> a day over ' + per.days +
+        ' worked days, in ' + fmtH(per.hours) + ' of picking. ' +
+        'Volume follows the hours somebody is given, so it is scale rather than a score.</div>' +
+    '</div></div>';
+}
+
+/* One bar per picker, tallest first, nobody but the subject named. The
+   subject is blue and carries the only number, because the question this
+   answers is "where do I sit", not "what did each of them get". */
+function crewChart(me, values, mine, avg, rank, n, fmt, note, label, std){
+  if(mine == null || !values.length) return '';
+  const all = values.map(v => ({ v: v, me: false })).concat([{ v: mine, me: true }])
+                    .sort((x, y) => y.v - x.v);
+  const top = Math.max.apply(null, all.map(x => x.v)) || 1;
+  const h = v => Math.max(2, v / top * 100);
+  return '<div class="distrow">' +
+    '<div class="cap"><b>' + label + '</b><span>' + esc(note) + '</span>' +
+      '<span class="r">' + (rank ? rank + getOrd(rank) + ' of ' + n : '') + '</span></div>' +
+    '<div class="crew">' +
+      (std == null || std > top ? '' : '<div class="crewstd" style="bottom:' + h(std) + '%"><span>standard</span></div>') +
+      (avg == null ? '' : '<div class="crewline" style="bottom:' + h(avg) + '%"><span>crew average ' + fmt(avg) + '</span></div>') +
+      all.map(x => '<div class="cb' + (x.me ? ' me' : '') + '" title="' +
+          (x.me ? esc(me) : 'another picker') + ': ' + fmt(x.v) + '">' +
+        (x.me ? '<em style="bottom:calc(' + h(x.v) + '% + 3px)">' + fmt(x.v) + '</em>' : '') +
+        '<i style="height:' + h(x.v) + '%"></i></div>').join('') +
+    '</div>' +
+    '<div class="crewfoot"><span>best</span><span>' + n + ' pickers</span><span>lowest</span></div>' +
+  '</div>';
+}
+function getOrd(n){ const s = ['th','st','nd','rd'], v = n % 100; return s[(v - 20) % 10] || s[v] || s[0]; }
+
+function areas(P){
+  const a = P.period.areaStat || {};
+  const rows = Object.keys(a).sort((x, y) => a[y].hours - a[x].hours);
+  if(!rows.length) return '';
+  const top = Math.max.apply(null, rows.map(k => a[k].pct || 0).concat([120]));
+  return '<section class="rs"><h2>Where the time went <span>each area against its own standard, biggest first</span></h2>' +
+    '<div class="rtwrap"><table class="rt"><thead><tr><th>Area</th><th class="num">Hours</th><th class="num">Picks</th>' +
+    '<th class="num">Their rate</th><th class="num">Standard</th><th class="num">%</th><th class="rtbar" style="width:28%"></th></tr></thead><tbody>' +
+    rows.map(k => {
+      const r = a[k];
+      /* the same test score() uses to withhold a percentage: under three
+         picks or under three minutes in the area */
+      const thin = r.pct == null;
+      return '<tr' + (thin ? ' class="thin" title="too little in this area to make a rate"' : '') + '>' +
+        '<td>' + esc(k) + '</td><td class="num">' + fmtH(r.hours) + '</td>' +
+        '<td class="num">' + r.picks.toLocaleString() + '</td>' +
+        '<td class="num">' + r.rate + '/h</td><td class="num">' + (r.target || '–') + '/h</td>' +
+        '<td class="num ' + band(r.pct) + '"><b>' + (r.pct == null ? '–' : r.pct + '%') + '</b></td>' +
+        '<td class="rtbar">' + (r.pct == null ? '' :
+          '<div class="minibar"><i class="b' + band(r.pct) + '" style="width:' + Math.min(100, r.pct / top * 100) + '%"></i>' +
+          '<b style="left:' + (100 / top * 100) + '%"></b></div>') + '</td></tr>';
+    }).join('') + '</tbody></table></div>' +
+    (rows.some(k => a[k].pct == null)
+      ? '<div class="rtnote">A dash means there was too little in that area to make a rate \u2014 under three ' +
+        'picks, or under three minutes. The hours and picks are real; the rate beside them is not worth ' +
+        'quoting, so the row is greyed.</div>'
+      : '') +
+    '</section>';
+}
+
+/* Picks, not percentages. The percentage is already on this page three
+   times over, and nobody finishes a shift thinking "that was ninety four
+   per cent" - they think "I did four hundred and twenty". So the bar is
+   what they picked, and the dashed line across each bar is what the
+   standard asked of that day: the hours they were actually on it, at the
+   standard for the work they were actually given. A half day asks for half,
+   which is the only way a bar of picks can be read without a short day
+   looking like a bad one. The colour is still the percentage, so the
+   verdict has not moved - only the number somebody can recognise. */
+function dayChart(P){
+  const d = P.byDay;
+  if(!d.length) return '';
+  /* picks, not lines: what the standard asked of the day is worked out
+     from picks, so pairing the bar with anything else would put two
+     different units on one chart */
+  const val = x => x.picks;
+  /* a full day at the standard for this person's work: the line to be over */
+  const full = (P.dayHours || 6.5) * (P.period.targetRate || 0);
+  const top = Math.max.apply(null, d.map(x => Math.max(val(x), x.expected || 0)).concat([full])) * 1.1 || 1;
+  const h = v => Math.max(2, (v || 0) / top * 100);
+  return '<section class="rs"><h2>Picks by day ' +
+      '<span>only the days they picked; days off are not here</span></h2>' +
+    '<div class="days">' +
+      (full > 0 ? '<div class="full" style="bottom:' + h(full) + '%"><span>a full day at standard, about ' +
+        Math.round(full).toLocaleString() + '</span></div>' : '') +
+      d.map(x => '<div class="day' + (x.out ? ' flag' : '') + '" title="' + fmtFull(x.key) + ': ' +
+          x.picks.toLocaleString() + ' picks against ' + Math.round(x.expected || 0).toLocaleString() +
+          ' asked for, ' + fmtH(x.hours) + ' active, ' + x.rate + '/h, ' +
+          (x.pct == null ? 'no percentage' : x.pct + '% of standard') +
+          (x.crewPct != null ? '. The floor that day: ' + x.crewPct + '%' : '') +
+          (x.out ? '. Outside their own usual range' : '') + '">' +
+        '<em>' + val(x).toLocaleString() + '</em>' +
+        '<i class="b' + band(x.pct) + '" style="height:' + h(val(x)) + '%"></i>' +
+        (x.expected > 0 ? '<b class="want" style="bottom:' + h(x.expected) + '%"></b>' : '') +
+        '</div>').join('') +
+      crewLine(d, h) +
+    '</div><div class="daylabs">' + d.map(x => '<div>' + fmtDay(x.key) + '</div>').join('') + '</div>' +
+    '<div class="daykey">' +
+      '<span><i class="want"></i>what the standard asked of that day</span>' +
+      (d.some(x => x.crewPct != null) ? '<span><i class="crew"></i>the floor\u2019s pace, in their hours</span>' : '') +
+      (d.some(x => x.out) ? '<span><i class="ring"></i>outside their own usual range</span>' : '') +
+    '</div>' +
+    '<div class="dayfoot">The dashed line on each bar is what the standard asked of that day \u2014 the hours ' +
+      'they were on it, at the standard for the work they were given, so a short day asks for less. ' +
+      (d.some(x => x.crewPct != null)
+        ? 'The blue line is what the rest of the shift was doing on the same days, converted to their hours: ' +
+          'where it dips with them, the day was the floor\u2019s and not theirs.'
+        : '') +
+    '</div>' +
+  '</section>';
+}
+
+/* The crew's percentage cannot be drawn on a chart of pick counts - they are
+   different units. What can is the crew's PACE applied to this person's
+   hours that day: the picks they would have come to at the floor's rate.
+   Same axis, same question, and it answers the one that stops a system day
+   being read as a personal one. */
+function crewLine(d, h){
+  const pts = d.map((x, i) => (x.crewPct != null && x.expected > 0)
+    ? { i: i, v: x.expected * x.crewPct / 100 } : null);
+  if(pts.filter(Boolean).length < 2) return '';
+  const n = d.length;
+  const x = i => (i + 0.5) / n * 100;
+  let path = '', open = false;
+  pts.forEach(p => {
+    if(!p){ open = false; return; }
+    path += (open ? 'L' : 'M') + x(p.i).toFixed(2) + ' ' + (100 - h(p.v)).toFixed(2) + ' ';
+    open = true;
+  });
+  return '<svg class="crewline-day" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">' +
+    '<path d="' + path.trim() + '" vector-effect="non-scaling-stroke"/></svg>';
+}
+
+function notes(P){
+  if(!P.notes.length) return '';
+  return '<section class="rs"><h2>Before you quote any of this</h2><div class="notes"><ul>' +
+    P.notes.map(n => '<li>' + esc(n.text) +
+      (n.days ? ' <span style="color:var(--muted)">(' + n.days.map(d => fmtDay(d.key) + ': ' + d.picks + ' picks').join(', ') + ')</span>' : '') +
+      '</li>').join('') + '</ul></div></section>';
+}
+
+/* ---------- page ---------- */
+
+function render(P){
+  if(P.bands) BANDS = P.bands;
+  const per = P.period;
+  const head =
+    '<div class="rhead"><h1>' + esc(P.who) + '</h1>' +
+      '<div class="sub">' + per.days + ' worked days · ' + fmtFull(per.from) + ' – ' + fmtFull(per.to) +
+        (P.shiftName ? ' · ' + esc(P.shiftName) + ' shift' : ' · all shifts') +
+        (P.offDays > 0 ? ' · ' + P.offDays + ' day' + (P.offDays === 1 ? '' : 's') + ' off in that stretch' : '') +
+      '</div>' +
+      '<div class="sp">' +
+        '<a class="btn small" href="/people?who=' + encodeURIComponent(P.who) + '">Full history</a>' +
+        '<button class="btn small" id="print">Print</button>' +
+      '</div></div>' +
+    '<div class="who-pick noprint"><label for="pick">Review someone else</label>' +
+      '<input id="pick" list="whos" placeholder="user ID" value=""><datalist id="whos"></datalist></div>';
+
+  /* The window as drawn, with a least squares line through it. The fit is
+     the direction; the points are what somebody will ask about. */
+  function dirChart(){
+    const d = P.byDay.filter(x => x.pct != null);
+    if(d.length < 2) return '';
+    const W = 640, H = 152, L = 34, R = 8, T = 16, B = 4;
+    const hi = Math.max(120, Math.max.apply(null, d.map(x => x.pct)));
+    const px = i => L + (d.length === 1 ? 0 : i / (d.length - 1) * (W - L - R));
+    const py = v => T + (1 - v / hi) * (H - T - B);
+
+    /* least squares over (day index, percent) */
+    const n = d.length;
+    let sx = 0, sy = 0, sxy = 0, sxx = 0;
+    d.forEach((p, i) => { sx += i; sy += p.pct; sxy += i * p.pct; sxx += i * i; });
+    const den = n * sxx - sx * sx;
+    const slope = den === 0 ? 0 : (n * sxy - sx * sy) / den;
+    const inter = (sy - slope * sx) / n;
+    const fitA = inter, fitB = inter + slope * (n - 1);
+    /* points per day, over the whole window: the number a supervisor is
+       actually being asked to explain */
+    const overall = Math.round(slope * (n - 1));
+    const fitCol = overall >= 5 ? 'var(--good)' : overall <= -5 ? 'var(--crit)' : 'var(--ink-2)';
+
+    const gridAt = [hi, 100, 0].filter((v, i, arr) => arr.indexOf(v) === i);
+    return '<svg class="dirplot" viewBox="0 0 ' + W + ' ' + H + '" role="img" ' +
+        'aria-label="percent of standard for each worked day, with the trend through it">' +
+      gridAt.map(v => '<line class="' + (v === 100 ? 'std' : 'grid') + '" x1="' + L + '" y1="' + py(v).toFixed(1) +
+        '" x2="' + W + '" y2="' + py(v).toFixed(1) + '"/>' +
+        '<text class="ax" x="0" y="' + (py(v) + 3.5).toFixed(1) + '">' + v + '%</text>').join('') +
+      '<path class="fit" style="stroke:' + fitCol + '" d="M' + px(0).toFixed(1) + ' ' + py(fitA).toFixed(1) +
+        ' L' + px(n - 1).toFixed(1) + ' ' + py(fitB).toFixed(1) + '"/>' +
+      '<path class="ln" d="' + d.map((p, i) => (i ? 'L' : 'M') + px(i).toFixed(1) + ' ' + py(p.pct).toFixed(1)).join(' ') + '"/>' +
+      d.map((p, i) => '<circle class="dot" cx="' + px(i).toFixed(1) + '" cy="' + py(p.pct).toFixed(1) + '" r="3.2">' +
+        '<title>' + fmtFull(p.key) + ': ' + p.pct + '% of standard, ' + p.picks + ' picks, ' + p.rate + '/h</title></circle>').join('') +
+      '<text x="' + px(0).toFixed(1) + '" y="' + (H - 0) + '" text-anchor="start">' + fmtDay(d[0].key) + '</text>' +
+      '<text x="' + W + '" y="' + (H - 0) + '" text-anchor="end">' + fmtDay(d[d.length - 1].key) + '</text>' +
+      '</svg>' +
+      '<div class="dirlegend"><span><i></i>each worked day</span>' +
+        '<span><i class="f"></i>the trend through them</span>' +
+        '<span><i class="s"></i>standard</span></div>';
+  }
+  const dc = dirChart();
+  const T = P.trend, c = P.consistency;
+  /* A line through scatter is still a line and reads as a decline. When the
+     change does not beat what the scatter alone would produce, the page
+     says so instead of letting the slope speak. */
+  const dirWord = !T ? '' :
+    T.real
+      ? '<b class="' + (T.change > 0 ? 'good' : 'bad') + '">' + T.word.charAt(0).toUpperCase() + T.word.slice(1) + '</b>' +
+        ' \u2014 ' + Math.abs(T.change) + ' points between the two halves, which is past the ' + T.bar +
+        ' their day-to-day scatter would produce on its own.'
+      : '<b>No change worth calling.</b> The two halves differ by ' + Math.abs(T.change) + ' point' +
+        (Math.abs(T.change) === 1 ? '' : 's') + ', and anything under ' + T.bar +
+        ' is what this person\u2019s ordinary scatter produces by itself.';
+  const trend = dc ? '<section class="rs"><h2>Is it moving? <span>every day of this window, and the line through them</span></h2>' +
+    '<div class="distrow">' +
+      '<div class="dirhead">' +
+        (T ? '<div class="dirdelta ' + (T.real ? (T.change > 0 ? 'good' : 'bad') : '') + '">' +
+          (T.change > 0 ? '\u25b2 +' : T.change < 0 ? '\u25bc ' : '\u25ac ') + T.change + ' pts</div>' : '') +
+        (dirWord ? '<div style="font-size:13px">' + dirWord + '</div>' : '') +
+      '</div>' + dc +
+      (c ? '<div class="dayfoot">Best day <b>' + c.best + '%</b>, worst <b>' + c.worst + '%</b>' +
+           (c.sd != null ? ', typically within <b>' + c.sd + '</b> points of their own average of ' + c.mean + '%' : '') +
+           '. ' + (c.noise ? 'Treat any difference smaller than <b>' + c.noise +
+             ' points</b> \u2014 between two weeks, or between two people \u2014 as noise rather than news.' : '') +
+           '</div>' : '') +
+    '</div></section>' : '';
+
+  const crew = P.crew;
+  const cmp = (crew.rankPct || crew.rankRate) ?
+    '<section class="rs crewsec"><h2>Against the crew ' +
+      '<span>' + (crew.shift ? esc(crew.shift) + ' shift, ' : '') + 'the same dates, everyone else anonymous</span></h2>' +
+      crewChart(P.who, crew.pcts, per.pct, crew.pctMean, crew.rankPct, crew.n,
+                v => Math.round(v) + '%', 'the fair comparison \u2014 each person against their own mix of work', '% of standard', 100) +
+      crewChart(P.who, crew.rates, per.rate, crew.rateMean, crew.rankRate, crew.n,
+                v => (Math.round(v * 10) / 10) + '/h', 'raw speed, not adjusted for the work they were given', 'Picks an hour') +
+    '</section>' : '';
+
+  $('app').innerHTML = head +
+    '<section class="rs"><h2>The last 5, 10, 15 and 20 worked days <span>read left to right: this is the trend' +
+      (P.windows.some(x => !x.full) ? ' \u2014 hatched cards had fewer days on file than they asked for' : '') +
+      '</span></h2>' +
+      '<div class="wins">' + P.windows.map(w => winCard(w, w.n === per.n)).join('') + '</div></section>' +
+    /* The order is the conversation, and each section exists to close off a
+       question before it gets asked badly.
+
+         what they did            scale, before any judgement
+         how it reads against KPI the judgement
+         which work               ...stratified, so "they were given slow
+                                  work" is answered before it is raised
+         where the shift went     is it a rate problem or an availability
+                                  one - two different conversations
+         picks by day             the evidence, with the floor laid over it
+         is it moving             whether there is a signal at all
+         against the crew         last, because it is the most abused number
+                                  on the page
+         before you quote any     what none of it can see */
+    '<section class="rs"><h2>Over ' + per.days + ' worked days</h2>' + gauges(P) + '</section>' +
+    areas(P) +
+    shiftSection(P) +
+    dayChart(P) +
+    trend +
+    cmp +
+    notes(P) +
+    '<p class="hint"><b>Every figure here is a day this person actually picked \u2014 nothing on this page is ' +
+      'estimated.</b> The year chart on their full history fills months with no records from their own ' +
+      'average, which is fair on a gallery and has no place in a review. ' +
+      'Standard is what one person should pick an hour in each area; a percentage is this ' +
+      'person’s picks against what those same hours should have produced given the work they actually did. ' +
+      'Active time counts somebody as working for ' + (P.windowMin || 30) + ' minutes after each scan. ' +
+      '<a href="/help#definitions">What every number means</a>.</p>' +
+    '<div class="sign"><div>Supervisor<u></u></div><div>Employee<u></u></div><div>Date<u></u></div></div>';
+
+  $('print').onclick = () => window.print();
+  document.querySelectorAll('.win').forEach(b => b.onclick = () => {
+    DAYS = +b.dataset.n;
+    const u = new URL(location.href);
+    u.searchParams.set('days', DAYS);
+    history.replaceState(null, '', u);
+    load();
+  });
+  const pick = $('pick');
+  pick.onchange = () => {
+    const v = pick.value.trim().toUpperCase();
+    if(v && v !== WHO){ WHO = v; const u = new URL(location.href); u.searchParams.set('who', v); location.href = u.toString(); }
+  };
+  fillNames();
+}
+
+/* every picker on file, for the box that swaps person */
+async function fillNames(){
+  try{
+    const r = await fetch('/api/pickers?days=30');
+    const j = await r.json();
+    const list = (j.people || []).concat(j.minor || []).map(p => p.who).sort();
+    const dl = $('whos');
+    if(dl) dl.innerHTML = list.map(w => '<option value="' + esc(w) + '">').join('');
+  }catch(e){}
+}
+
+/* Days on file, none of them long enough to be a picking day. Worth its own
+   screen: it is the floor working, not the tool failing, and a supervisor
+   needs to see the days before deciding whether the floor is wrong. */
+function belowFloor(j){
+  ACT = j.acts || ACT;
+  $('app').innerHTML =
+    '<div class="rhead"><h1>' + esc(j.who) + '</h1>' +
+      '<div class="sub">no picking days in the record</div></div>' +
+    '<div class="distrow" style="max-width:46em">' +
+      '<p>There ' + (j.seenCount === 1 ? 'is <b>1 day</b>' : 'are <b>' + j.seenCount + ' days</b>') +
+        ' on file for ' + esc(j.who) + ', but ' + (j.seenCount === 1 ? 'it does not have' : 'none of them has') +
+        ' <b>' + j.minHours + ' hours</b> or more of picking in it' +
+        ', so there is nothing here a review should be built on.</p>' +
+      '<table class="rt"><thead><tr><th>Day</th><th class="num">Picks</th><th class="num">Picking time</th></tr></thead><tbody>' +
+      j.seen.map(d => '<tr><td>' + fmtFull(d.key) + '</td><td class="num">' + d.picks +
+        '</td><td class="num">' + fmtH(d.hours) + '</td></tr>').join('') +
+      '</tbody></table>' +
+      (j.instead
+        ? '<p style="margin-top:12px">They were not idle: over ' + (j.seenCount === 1 ? 'that day' : 'those days') +
+            ' they confirmed ' + Object.keys(j.instead.acts).sort((a, b) => j.instead.acts[b] - j.instead.acts[a])
+              .map(k => '<b>' + j.instead.acts[k].toLocaleString() + '</b> ' + actName(k)).join(', ') +
+            ', about <b>' + fmtHM(j.instead.hours) + '</b> of work that was not picking.</p>'
+        : '') +
+      '<p class="hint" style="margin-top:12px">' +
+        (j.instead && j.instead.hours >= 2
+          ? 'This reads as somebody doing other warehouse work rather than a picker having a bad run. '
+          : 'Usually this is somebody who covered for an hour rather than somebody who picks. ') +
+        'If that is not it \u2014 if this is a real picker and the floor is set too high \u2014 ' +
+        '<a href="' + location.pathname + '?who=' + encodeURIComponent(j.who) + '&days=' + DAYS + '&minHours=0">' +
+        'show it anyway</a>, or change <b>A day counts as picking from</b> on the picker page.</p>' +
+    '</div>' +
+    '<div class="who-pick noprint"><label for="pick">Review someone else</label>' +
+      '<input id="pick" list="whos" placeholder="user ID"><datalist id="whos"></datalist></div>';
+  const pick = $('pick');
+  pick.onchange = () => {
+    const v = pick.value.trim().toUpperCase();
+    if(v){ const u = new URL(location.href); u.searchParams.set('who', v); u.searchParams.delete('minHours'); location.href = u.toString(); }
+  };
+  fillNames();
+}
+
+async function load(){
+  if(!WHO){
+    $('app').innerHTML = '<div class="empty">No picker asked for. Open a person on the ' +
+      '<a href="/people">People</a> page and choose Review, or add <code>?who=ID</code> to the address.</div>';
+    return;
+  }
+  try{
+    const p = new URLSearchParams({ who: WHO, days: String(DAYS) });
+    const mh = q.get('minHours');
+    if(mh != null) p.set('minHours', mh);
+    if(SHIFT != null) p.set('shift', SHIFT);
+    const r = await fetch('/api/review?' + p.toString());
+    const j = await r.json();
+    if(!r.ok){
+      if(j.empty === 'belowFloor') return belowFloor(j);
+      throw new Error(j.error || 'could not load the review');
+    }
+    render(j);
+  }catch(e){
+    $('app').innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    fillNames();
+  }
+}
+load();
+</script>
+</body>
+</html>
